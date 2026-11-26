@@ -1,93 +1,555 @@
-# Secret Wards: Evidence-Guided Privacy Compiler
+# 🛡️ RAKSHA — Evidence-Guided Privacy Compiler
 
-**Product:** Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records (Yugaantar DevForge, Track 3)  
-**Team:** secret-wards  
-**Repository:** https://github.com/Tarun4201/secret-wards  
+**Track 3: Secret Wards | Yugaantar DevForge Hackathon**
 
----
+> Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records.
 
-## 1. Executive Summary & USP
-
-Hospitals in Yugaantar Pradesh merge disparate, heterogeneous clinical records across English, Devanagari Hindi, and Hinglish. Standard off-the-shelf PII redaction either drops vital medical contexts or leaks quasi-identifiers across transliterations and fragmented identities.
-
-**USP:** An *Evidence-Guided Privacy Compiler* that tracks cross-script evidence through reading, linkage, and transformation, blocks unsafe merges on conflicting evidence, guarantees zero direct-identifier leaks, applies role-first clinical protection, and strictly preserves critical clinical values (medicines, dosages, vitals, labs with units, diagnoses, procedures, and length of stay).
+[![Status](https://img.shields.io/badge/status-READY%20TO%20SUBMIT-brightgreen)]()
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
+[![Tests](https://img.shields.io/badge/tests-67%2F67%20passing-brightgreen)]()
+[![Leaks](https://img.shields.io/badge/PII%20leaks-0%25-brightgreen)]()
 
 ---
 
-## 2. Architecture & Pipeline
+## Table of Contents
+
+- [What is RAKSHA?](#what-is-raksha)
+- [Results at a Glance](#results-at-a-glance)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Offline Setup (Step-by-Step)](#offline-setup-step-by-step)
+- [Running the Pipeline](#running-the-pipeline)
+- [Running Tests](#running-tests)
+- [Running the Attacker Benchmark](#running-the-attacker-benchmark)
+- [Official Validation](#official-validation)
+- [Configuration](#configuration)
+- [Output Format](#output-format)
+- [Dependencies](#dependencies)
+- [Troubleshooting](#troubleshooting)
+- [Team](#team)
+
+---
+
+## What is RAKSHA?
+
+Hospitals in Yugaantar Pradesh are merging clinical records from 4 different hospital systems. These records are written in **English**, **Devanagari Hindi**, and **Hinglish** (mixed).
+
+RAKSHA is a privacy pipeline that:
+
+1. **Finds** all personal data (names, phones, Aadhaar, addresses, insurance IDs) across all 3 scripts.
+2. **Removes** personal identifiers and replaces them with safe pseudonyms.
+3. **Keeps** all medical data intact (medicines, doses, vitals, lab values, diagnoses, procedures).
+4. **Links** records of the same patient across hospitals without merging different people.
+5. **Verifies** every output file for any leaked personal data before release.
+
+**Key constraints:** Runs fully offline, CPU-only, with zero LLMs or cloud APIs. Deterministic output — same input + same secret = same output every time.
+
+---
+
+## Results at a Glance
+
+| Metric | Result |
+|--------|--------|
+| Personal data leaks | **0 / 3,230 (0.0%)** |
+| Canary traps leaked | **0 / 4** |
+| Medical data preserved | **4,854 / 4,855 (99.98%)** |
+| Patient linkage precision | **1.00 (0 false merges)** |
+| Patient linkage recall | **0.70** |
+| Attacker re-identification | **0.0%** (vs 53% on raw data) |
+| Unit tests | **67 / 67 passing** |
+| Official contract | ✅ `CONTRACT OK` |
+| Submission check | ✅ `READY TO SUBMIT` |
+| Runtime (practice data) | **~4 seconds** |
+
+---
+
+## Architecture
 
 ```
-Heterogeneous Raw Input (CSV, TSV, Nested JSON, FHIR R4, Text notes)
-   │
-   ▼
-1. Safe Ingestion & Bounded Parsers (encoding detection: UTF-8, UTF-16, cp1252)
-   │
-   ▼
-2. Multilingual Hybrid Detector (Rules, Gazetteers, Transliteration, Role-First Clinical Veto)
-   │
-   ▼
-3. Evidence Ledger & Conflict-Aware Record Linkage (Blocking, Fuzzy/Phonetic Cross-Script, No Transitive Over-merge)
-   │
-   ▼
-4. Pseudonymization & Date Shifting (Keyed HMAC-SHA256 from RAKSHA_SECRET, Coherent per-patient shift)
-   │
-   ▼
-5. Output Serializers & Channel Cleaning (sanitized/, report.json, records.jsonl)
-   │
-   ▼
-6. Sweep Verification (Double-checks side channels, file names, headers, metadata)
+┌─────────────────────────────────────────────────────────────────────┐
+│                        RAKSHA PIPELINE                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  1. SAFE INGESTION & BOUNDED PARSERS     │                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • Encoding detection (UTF-8/16, cp1252) │                       │
+│  │  • Format: JSON, CSV, TSV, FHIR R4, TXT  │                       │
+│  │  • Broken/unsupported → quarantine        │                       │
+│  │  • Nesting depth limits, size guards      │                       │
+│  └────────────────────┬─────────────────────┘                       │
+│                       ▼                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  2. MULTILINGUAL PII DETECTOR            │                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • 50+ regex patterns (Latin + Devanagari)│                       │
+│  │  • 500+ name gazetteer (Indian names)     │                       │
+│  │  • Indic digit detection (Aadhaar, phone) │                       │
+│  │  • Role-first clinical veto:              │                       │
+│  │    ✓ "Dolo 650" → NOT a phone number      │                       │
+│  │    ✓ "C/O fever" → NOT a person name      │                       │
+│  │    ✓ "Ramipril 5 mg" → protected          │                       │
+│  └────────────────────┬─────────────────────┘                       │
+│                       ▼                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  3. EVIDENCE GRAPH & RECORD LINKAGE      │                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • Cross-script name skeleton             │                       │
+│  │    (Mohammad = Mohd = मोहम्मद)             │                       │
+│  │  • Multi-pass blocking on strong IDs      │                       │
+│  │    (UHID, Aadhaar, ABHA, phone)           │                       │
+│  │  • Phonetic fuzzy matching (Jellyfish)     │                       │
+│  │  • Conflict-aware: no transitive merges   │                       │
+│  │  • Weak evidence → patient: null           │                       │
+│  └────────────────────┬─────────────────────┘                       │
+│                       ▼                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  4. PSEUDONYMIZATION & DATE SHIFTING     │                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • Keyed HMAC-SHA256 (from RAKSHA_SECRET)│                       │
+│  │  • Stable pseudonyms: PSN-XXXXXX          │                       │
+│  │  • Per-patient coherent date shifts       │                       │
+│  │  • Age → 5-year bands (always truthful)   │                       │
+│  │  • PIN codes → 3-digit prefix only        │                       │
+│  └────────────────────┬─────────────────────┘                       │
+│                       ▼                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  5. OUTPUT SERIALIZERS & CHANNEL CLEANING│                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • sanitized/ (cleaned files)             │                       │
+│  │  • report.json (audit + statistics)       │                       │
+│  │  • records.jsonl (all records, linked)     │                       │
+│  │  • Filenames, headers, keys cleaned       │                       │
+│  └────────────────────┬─────────────────────┘                       │
+│                       ▼                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  6. SWEEP VERIFIER (Final Safety Net)    │                       │
+│  │  ─────────────────────────────────────    │                       │
+│  │  • Re-scans all output for any leaked PII│                       │
+│  │  • Checks side channels: filenames,       │                       │
+│  │    metadata, JSON keys, headers           │                       │
+│  │  • Leaky files → re-cleaned or quarantined│                       │
+│  └──────────────────────────────────────────┘                       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Rule-based, no ML** | Deterministic, offline, CPU-only. No model weights to load. |
+| **Gazetteer + regex** | Covers Indian names across Latin and Devanagari without training data. |
+| **Role-first clinical veto** | Prevents medical data from being wrongly flagged as PII (e.g., drug names, dosages). |
+| **Evidence graph linkage** | Links patient records safely; rejects when evidence conflicts. |
+| **Sweep verifier** | Final safety net — catches anything the main detector missed. |
+| **Quarantine, not crash** | Broken files are quarantined with reasons; pipeline never crashes. |
+
+---
+
+## Project Structure
+
+```
+raksha/
+├── main.py                  # Core pipeline (single file, ~2800 lines)
+├── config/
+│   └── policy.yaml          # Privacy policy configuration
+├── requirements.txt         # Runtime dependencies (6 packages)
+├── requirements-dev.txt     # Dev/test dependencies
+├── Makefile                 # Shortcuts: make test, make bench
+├── pyproject.toml           # Ruff linter config
+├── raksha.toml              # Project metadata
+│
+├── docs/
+│   ├── BRIEF.md             # 2-page technical brief
+│   ├── DECISIONS.md          # Architecture decision log
+│   └── RAKSHA_OFFICIAL_TEST_REPORT.md  # Test results report
+│
+├── tests/                   # 67 unit & integration tests
+│   ├── test_clinical_protection.py
+│   ├── test_comprehensive_ingestion.py
+│   ├── test_date_shift_and_age.py
+│   ├── test_determinism.py
+│   ├── test_evidence_graph_linkage.py
+│   ├── test_fhir.py
+│   ├── test_integration_contract.py
+│   ├── test_linkage.py
+│   ├── test_name_skeleton.py
+│   ├── test_pseudonym.py
+│   ├── test_role_resolver.py
+│   ├── test_safe_reader.py
+│   ├── test_security_and_sweep.py
+│   ├── test_semantic_column_typing.py
+│   ├── test_serializers.py
+│   ├── test_sweep_variants.py
+│   ├── test_textual_dates_and_nlem.py
+│   ├── ... and more
+│   └── fixtures/             # Test data (synthetic only)
+│
+└── tools/                    # Benchmarking & testing utilities
+    ├── attacker/             # Adversarial re-identification tester
+    │   ├── attacker.py
+    │   └── llm_attacker.py
+    ├── benchmark/
+    │   ├── benchmark.py      # Privacy vs utility benchmark
+    │   └── ablation.py       # Technique ablation study
+    └── datagen/              # Synthetic test data generators
 ```
 
 ---
 
-## 3. How It Works
+## Offline Setup (Step-by-Step)
 
-- **Ingestion & Format Handling:** Supports UTF-8, UTF-8 BOM, UTF-16, and cp1252 encodings. Broken, deeply nested, or unsupported formats are quarantined safely with audit reasons in `report.json` without copying raw bytes.
-- **Role-First Clinical Veto:** Distinguishes relative names from clinical complaints (e.g., `"C/O Ramesh"` vs `"C/O fever"`). Protects doctor names (`"Dr. Ramesh"`) while removing patient/relative PII. Guards dosages and regimens (`"Dolo 650 BD x 5 days"`, `"1-0-1"`, `"5 mg"`) from false phone/ID detection.
-- **Cross-Script Name Skeleton:** Transliterates Devanagari to Latin and normalizes phonetic variants (Mohammad, Mohd, Md., मोहम्मद) to unify patient entities across files and hospitals.
-- **Linkage & Keyed Pseudonyms:** Employs multi-pass blocking across strong IDs (UHID, Aadhaar, ABHA, phone) and corroborating evidence (village, relative, age). Unambiguous matches form clusters; ambiguous records receive `patient: null` to avoid false merges. Pseudonyms (`PSN-XXXXXX`) and date shifts are derived via keyed HMAC with `RAKSHA_SECRET`.
-- **Quasi-Identifier Generalization:** Ages are banded into 5-year brackets (always containing the true age), locations are generalized, and PIN codes keep 3-digit prefixes.
-- **Security & Channel Hygiene:** Fully offline and CPU-only. In-memory processing prevents raw file spills to disk. All side channels (file names, headers, keys, metadata) are purged of PII.
+> ⚠️ **The event day has NO internet.** Follow these steps to prepare everything offline before the event.
 
----
+### Pre-Event Preparation (While You Have Internet)
 
-## 4. Setup & Running
-
-### Requirements
-- Python 3.10+
-- Dependencies listed in `requirements.txt` (lightweight, standard CPU libraries: `regex`, `rapidfuzz`, `jellyfish`, `phonenumbers`, `indic-transliteration`)
-- Strictly zero LLMs or cloud AI APIs at runtime.
-
-### Execution
 ```bash
-# Setup
+# 1. Clone the repository
+git clone https://github.com/Tarun4201/secret-wards.git
+cd secret-wards
+
+# 2. Create a virtual environment
+python3 -m venv .venv
+
+# 3. Activate it
+#    macOS / Linux:
+source .venv/bin/activate
+#    Windows PowerShell:
+#    .venv\Scripts\Activate.ps1
+#    Windows CMD:
+#    .venv\Scripts\activate.bat
+
+# 4. Install runtime dependencies
 pip install -r requirements.txt
 
-# Run firewall (Linux/macOS/Bash):
-export RAKSHA_SECRET="your-secret-key"
-python main.py --input /path/to/input --output /path/to/output
+# 5. (Optional) Install dev/test dependencies
+pip install -r requirements-dev.txt
 
-# Run firewall (Windows PowerShell):
-# $env:RAKSHA_SECRET="your-secret-key"
-# python main.py --input /path/to/input --output /path/to/output
+# 6. Verify everything is installed
+pip list | grep -E "regex|rapidfuzz|jellyfish|phonenumbers|indic-transliteration|psutil"
 
-# Run unit & integration tests (70 tests across Tiers 1-4, including 22-file challenge set)
+# 7. Run tests to confirm it works
 make test
+```
 
-# Run RAKSHA privacy vs utility benchmark
-make bench
+### Pre-Download All Wheels for Offline Install
 
-# Run systematic ablation study (PRD v4 Section 5.1)
-python tools/benchmark/ablation.py
+If your teammates need to install on a machine without internet:
+
+```bash
+# Download all wheels to a folder (run this WHILE ONLINE)
+mkdir -p offline_wheels
+pip download -r requirements.txt -d offline_wheels/
+pip download -r requirements-dev.txt -d offline_wheels/
+
+# Transfer the entire project folder (including offline_wheels/) to the offline machine
+```
+
+### Offline Install (No Internet)
+
+```bash
+cd secret-wards
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate   # or Windows equivalent
+
+# Install from local wheels
+pip install --no-index --find-links=offline_wheels/ -r requirements.txt
+
+# Verify
+python3 -c "import regex, rapidfuzz, jellyfish, phonenumbers, indic_transliteration, psutil; print('All deps OK')"
 ```
 
 ---
 
-## 5. Technical Brief
-For a deep dive into the 7 internal techniques, threat model, and experimental benchmark tables, see the [2-Page Technical Brief](docs/BRIEF.md).
+## Running the Pipeline
+
+### Basic Usage
+
+```bash
+# 1. Activate virtual environment
+source .venv/bin/activate
+
+# 2. Set the secret key (REQUIRED — used for pseudonym generation)
+export RAKSHA_SECRET="your-team-secret-key-here"
+
+# 3. Run the pipeline
+python3 main.py --input /path/to/input --output /path/to/output
+```
+
+### Windows PowerShell
+
+```powershell
+.venv\Scripts\Activate.ps1
+$env:RAKSHA_SECRET = "your-team-secret-key-here"
+python main.py --input C:\path\to\input --output C:\path\to\output
+```
+
+### Example with Practice Data
+
+```bash
+# Assuming toolkit is in a sibling directory
+export RAKSHA_SECRET="my-secret-2024"
+python3 main.py --input ../toolkit/dev/input --output ./output
+```
+
+### What Happens
+
+1. Pipeline reads all files from `--input` directory recursively.
+2. Detects and removes PII across English, Hindi, and Hinglish.
+3. Links patient records across hospitals.
+4. Writes sanitized output to `--output` directory.
+5. Prints a summary table to stdout.
+
+### Important Notes
+
+- **`RAKSHA_SECRET` is mandatory.** The pipeline will fail without it.
+- **Same secret = same output.** Pseudonyms and date shifts are deterministic.
+- **Different secret = different pseudonyms.** You can't reverse-engineer the secret from the output.
+- **Never share or log the secret.** It never appears in any output file.
 
 ---
 
-## 6. Declared Models and Dependencies
-- **Runtime:** `regex`, `rapidfuzz`, `jellyfish`, `phonenumbers`, `indic-transliteration`, `psutil`.
-- **No LLMs:** No transformer models, no external network calls, no cloud services used during evaluation. All logic is rule-based, phonetic, gazetteer-driven, and algorithmic.
+## Running Tests
+
+```bash
+# Activate virtual environment first
+source .venv/bin/activate
+
+# Run all 67 tests
+make test
+# or equivalently:
+python3 -m unittest discover -s tests -p "test_*.py"
+
+# Run a specific test file
+python3 -m unittest tests.test_clinical_protection
+
+# Run with verbose output
+python3 -m unittest discover -s tests -p "test_*.py" -v
+
+# Run with pytest (if installed)
+pytest tests/ -v
+```
+
+### Test Categories
+
+| Test File | What It Tests |
+|-----------|---------------|
+| `test_clinical_protection.py` | Medicines, doses, vitals not wrongly removed |
+| `test_comprehensive_ingestion.py` | CSV, TSV, JSON, FHIR, TXT parsing |
+| `test_date_shift_and_age.py` | Date shifting, age banding |
+| `test_determinism.py` | Same input + secret = same output |
+| `test_evidence_graph_linkage.py` | Cross-hospital patient linking |
+| `test_fhir.py` | FHIR R4 bundle handling |
+| `test_integration_contract.py` | Output contract (sanitized/, report.json, records.jsonl) |
+| `test_name_skeleton.py` | Cross-script name normalization |
+| `test_pseudonym.py` | HMAC pseudonym generation |
+| `test_role_resolver.py` | Doctor vs patient vs relative roles |
+| `test_safe_reader.py` | Encoding detection, malformed files |
+| `test_security_and_sweep.py` | Side-channel cleaning, sweep verifier |
+| `test_semantic_column_typing.py` | Column-type inference |
+| `test_sweep_variants.py` | Variant probes for leaked values |
+
+---
+
+## Running the Attacker Benchmark
+
+Test how well the pipeline resists re-identification:
+
+```bash
+# Run the voter-registry attacker against sanitized output
+python3 tools/attacker/attacker.py \
+    --registry ../toolkit/dev/attacker/registry.csv \
+    --sanitized ./output/sanitized \
+    --records ./output/records.jsonl
+```
+
+### Run the Full Benchmark Suite
+
+```bash
+# Privacy vs utility benchmark
+make bench
+
+# Ablation study (tests each technique's contribution)
+make ablation
+```
+
+---
+
+## Official Validation
+
+Run the official toolkit checks to verify submission readiness:
+
+```bash
+# 1. Validate output contract
+python3 ../toolkit/validate_output.py --input ../toolkit/dev/input --output ./output
+# Expected: "CONTRACT OK"
+
+# 2. Check detection accuracy
+python3 ../toolkit/check_dev.py --output ./output --show 10
+# Expected: 0 leaks, 0 canaries
+
+# 3. Full submission check (runs pipeline 3x for determinism)
+python3 ../toolkit/check_submission.py --repo . --run
+# Expected: "READY TO SUBMIT"
+```
+
+> **Note:** Do NOT modify the official toolkit scripts. They are the source of truth.
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RAKSHA_SECRET` | **Yes** | Secret key for HMAC pseudonyms and date shifts. Never logged. |
+| `RAKSHA_DISABLE_CLINICAL_VETO` | No | Set to `1` to disable clinical veto (for ablation testing only). |
+| `RAKSHA_DISABLE_NAME_SKELETON` | No | Set to `1` to disable cross-script name normalization. |
+| `RAKSHA_DISABLE_SWEEP_VERIFIER` | No | Set to `1` to disable the sweep verifier. |
+| `RAKSHA_DISABLE_SEMANTIC_TYPING` | No | Set to `1` to disable semantic column typing. |
+| `RAKSHA_DISABLE_NEGATIVE_EVIDENCE` | No | Set to `1` to disable negative evidence in linkage. |
+| `RAKSHA_DISABLE_PRIVACY_PLANNER` | No | Set to `1` to disable the privacy planner. |
+
+### Policy Config (`config/policy.yaml`)
+
+```yaml
+age_band_years: 5             # Width of age bands (e.g., 25-29)
+date_shift_max_days: 180      # Maximum random date shift in days
+min_group_size: 5             # Minimum k-anonymity group size
+link_strong_threshold: 0.8   # Confidence threshold for patient linking
+link_margin: 0.2              # Margin below threshold → patient: null
+```
+
+---
+
+## Output Format
+
+The pipeline produces exactly 3 outputs inside the `--output` directory:
+
+```
+output/
+├── sanitized/          # Cleaned files (same structure as input)
+│   ├── hospital_a/
+│   │   ├── discharge_summary_PSN-A1B2C3.txt
+│   │   └── labs_cleaned.csv
+│   └── hospital_b/
+│       └── bundle_cleaned.json
+├── report.json         # Audit report with statistics
+└── records.jsonl       # All records, one per line, with pseudonyms
+```
+
+### `report.json` Contents
+
+- Input file SHA-256 hashes
+- Number of files processed, sanitized, quarantined
+- Number of records extracted
+- PII types detected and counts
+- Quarantine reasons for rejected files
+- Runtime and memory usage
+
+### `records.jsonl` Format
+
+Each line is a JSON object:
+
+```json
+{
+  "patient": "PSN-A1B2C3",
+  "source_sha256": "abc123...",
+  "hospital": "hospital_a",
+  "record_type": "discharge_summary",
+  "data": { "...sanitized clinical fields..." }
+}
+```
+
+If patient identity is uncertain: `"patient": null`
+
+---
+
+## Dependencies
+
+### Runtime (6 packages — all lightweight, CPU-only)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `regex` | ≥ 2024.0 | Advanced regex with Unicode support |
+| `rapidfuzz` | ≥ 3.0 | Fast fuzzy string matching for linkage |
+| `jellyfish` | ≥ 1.0 | Phonetic algorithms (Soundex, Metaphone) |
+| `phonenumbers` | ≥ 8.13 | Phone number parsing and validation |
+| `indic-transliteration` | ≥ 2.3 | Devanagari ↔ Latin transliteration |
+| `psutil` | ≥ 5.9 | Memory monitoring |
+
+### Dev/Test (optional)
+
+| Package | Purpose |
+|---------|---------|
+| `pytest` | Test runner |
+| `pytest-cov` | Coverage reporting |
+| `hypothesis` | Property-based testing |
+| `scikit-learn` | Linkage evaluation metrics |
+| `ruff` | Linter |
+| `faker` | Synthetic data generation |
+
+**No LLMs.** No transformers. No neural networks. No cloud APIs. Everything is rule-based, phonetic, gazetteer-driven, and algorithmic.
+
+---
+
+## Troubleshooting
+
+### "RAKSHA_SECRET not set"
+
+```bash
+export RAKSHA_SECRET="your-secret"  # Linux/macOS
+$env:RAKSHA_SECRET = "your-secret"  # Windows PowerShell
+set RAKSHA_SECRET=your-secret       # Windows CMD
+```
+
+### "ModuleNotFoundError: No module named 'regex'"
+
+```bash
+# Make sure your virtual environment is activated
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### "CONTRACT OK" but "check_dev.py" shows leaks
+
+The practice data may have edge cases. Check which PII types are leaking and inspect the specific files. Common causes:
+- New name not in the gazetteer
+- Unusual identifier format
+- Devanagari digits in phone/Aadhaar numbers
+
+### Pipeline quarantines too many files
+
+Check `report.json` for quarantine reasons. Common causes:
+- Deeply nested JSON (> 50 levels)
+- Empty files
+- Binary files in the input
+- Encoding issues (try re-saving as UTF-8)
+
+### Tests fail on a fresh clone
+
+```bash
+# Make sure you have dev dependencies
+pip install -r requirements-dev.txt
+# Run tests
+make test
+```
+
+---
+
+## Team
+
+**Team:** secret-wards  
+**Track:** 3 — Secret Wards  
+**Event:** Yugaantar DevForge Hackathon  
+**Repository:** https://github.com/Tarun4201/secret-wards
+
+---
+
+## License
+
+This project is built for the Yugaantar DevForge Hackathon (Track 3: Secret Wards).
