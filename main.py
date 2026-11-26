@@ -554,9 +554,10 @@ RE_DOSE = re.compile(
     r'\bx\s*\d+\s*(?:days?|weeks?|months?))\b'
 )
 
-# Doctor name pattern
+# Doctor name pattern (English and Devanagari)
 RE_DOCTOR = re.compile(
-    r'(?:Dr\.?\s+|Doctor\s+|Consultant:?\s*)([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)'
+    r'(?i)(?:dr\.?\s+|doctor\s+|consultant:?\s*|डॉ\.?\s*|डॉक्टर\s*:?\s*|चिकित्सक\s*:?\s*)'
+    r'([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)*)'
 )
 
 # ---------------------------------------------------------------------------
@@ -737,6 +738,12 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     for m in RE_HOUSE.finditer(text):
         detections.append(Detection('HOUSE', m.group(0), (m.start(), m.end()), channel=channel))
 
+    # 9b. Village / locality patterns in free text
+    for m in re.finditer(r'(?i)(?:\b(?:village|vill\.?|gaon)\b|गाँव|ग्राम)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]+)', text):
+        v_name = m.group(1).strip()
+        if v_name and len(v_name) > 1:
+            detections.append(Detection('VILLAGE', v_name, (m.start(1), m.start(1) + len(v_name)), channel=channel))
+
     # 10. Names - detect using anchored patterns and gazetteer
     # Patient Name: label (handle "Patient Name: Priya Sharma", "Patient: Priya Sharma", "Naam: ...")
     for m in re.finditer(r'(?i)(?:patient\s+name|patient\s*:|rogi\s*(?:ka\s*)?naam|naam\s*:|नाम\s*:|रोगी\s*का\s*नाम|मरीज़?\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text):
@@ -753,14 +760,24 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
             if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
                 detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
 
-    # Relative names from relation cues (also handle "S/o:", "W/o:", "D/o:" with colons)
-    for m in re.finditer(r'(?i)\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)\s*:?\s*([A-Z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n]|$)', text):
+    # Doctor names in English and Devanagari (should NOT be removed)
+    for m in RE_DOCTOR.finditer(text):
+        doc_raw = m.group(1).strip()
+        DOCTOR_NAMES.add(normalize_text(doc_raw))
+        for w in doc_raw.split():
+            if len(w) > 2:
+                DOCTOR_NAMES.add(normalize_text(w))
+
+    # Relative names from relation cues in English & Hindi
+    for m in re.finditer(
+        r'(?i)(?:\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?|अभिभावक|पुत्र|पत्नी)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n]|$)',
+        text
+    ):
         name = m.group(1).strip()
         if name and len(name) > 1:
-            # Remove trailing address-like content
-            name = re.split(r'(?i)\s*(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin)', name)[0].strip()
-            if name:
-                detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)),
+            name = re.split(r'(?i)\s*(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin|गाँव|ग्राम|पता)', name)[0].strip()
+            if name and normalize_text(name) not in DOCTOR_NAMES:
+                detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.start(1) + len(name)),
                                           channel=channel, role='relative'))
 
     # C/O names (but not complaints)
@@ -775,10 +792,6 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
                                           (m.end(), m.end()+name_m.end(1)),
                                           channel=channel, role='relative'))
 
-    # Doctor names (should NOT be removed)
-    for m in RE_DOCTOR.finditer(text):
-        DOCTOR_NAMES.add(normalize_text(m.group(1)))
-
     # Attendant / Visitor / Caller / Witness patterns (canaries and attendant mentions)
     for m in re.finditer(r'(?i)\b(?:called\s+by|witnessed\s+by|attendant:?|visitor:?)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)', text):
         name = m.group(1).strip()
@@ -790,22 +803,20 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         if not any(d in name.lower() for d in DRUG_NAMES) and normalize_text(name) not in DOCTOR_NAMES:
             detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
 
-    # Names in Devanagari (look for multi-word sequences in Devanagari script)
-    for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F\s]+)', text):
+    # Names in Devanagari (horizontal whitespace only, never cross lines!)
+    for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F \t]+)', text):
         segment = m.group(1).strip()
         words = segment.split()
         if len(words) >= 2:
-            # Check if any word is a known name
-            has_name = False
-            for w in words:
-                wn = normalize_text(w)
-                if wn in COMMON_INDIAN_NAMES:
-                    has_name = True
-                    break
+            norm_seg = normalize_text(segment)
+            # Skip if this segment is part of doctor names or clinical labels
+            if any(dn in norm_seg for dn in DOCTOR_NAMES):
+                continue
+            if any(kw in segment for kw in ('दवा', 'शिकायत', 'अस्पताल', 'डॉक्टर', 'जाँच', 'दिनांक', 'तारीख', 'रोगी', 'पिता', 'माता', 'पति', 'उम्र', 'वर्ष')):
+                continue
+            has_name = any(normalize_text(w) in COMMON_INDIAN_NAMES for w in words)
             if has_name:
-                # Check it's not a medical term or disease
-                is_medical = any(normalize_text(w) in MEDICAL_TERMS or normalize_text(w) in DISEASE_EPONYMS
-                               for w in words)
+                is_medical = any(normalize_text(w) in MEDICAL_TERMS or normalize_text(w) in DISEASE_EPONYMS for w in words)
                 if not is_medical:
                     detections.append(Detection('PATIENT_NAME', segment,
                                               (m.start(), m.end()), confidence=0.7, channel=channel))
