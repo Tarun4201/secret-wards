@@ -63,8 +63,13 @@ Heterogeneous Raw Input (CSV, TSV, Nested JSON, FHIR R4, Text notes)
 # Setup
 pip install -r requirements.txt
 
-# Run firewall
-RAKSHA_SECRET="your-secret-key" python main.py --input /path/to/input --output /path/to/output
+# Run firewall (Linux/macOS/Bash):
+export RAKSHA_SECRET="your-secret-key"
+python main.py --input /path/to/input --output /path/to/output
+
+# Run firewall (Windows PowerShell):
+# $env:RAKSHA_SECRET="your-secret-key"
+# python main.py --input /path/to/input --output /path/to/output
 
 # Run unit & integration tests (70 tests across Tiers 1-4, including 22-file challenge set)
 make test

@@ -140,8 +140,13 @@ pip install -r requirements.txt
 python -m pytest
 
 # 4. Run firewall pipeline
+# Linux / macOS / Bash:
 export RAKSHA_SECRET="evaluation_secret_key_123"
 python main.py --input tests/fixtures/challenge_set --output my_output
+
+# Windows (PowerShell):
+# $env:RAKSHA_SECRET="evaluation_secret_key_123"
+# python main.py --input tests/fixtures/challenge_set --output my_output
 
 # 5. Run 3-version benchmark & ablation study
 python tools/benchmark/benchmark.py
