@@ -13,6 +13,7 @@ import argparse
 import base64
 import csv
 import datetime as dt
+import difflib
 import hashlib
 import hmac
 import io
@@ -86,7 +87,8 @@ SECRET = os.environ.get("RAKSHA_SECRET", "").encode()
 # ---------------------------------------------------------------------------
 DEVA_TO_LATIN = {
     'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo',
-    'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au', 'अं': 'an', 'अः': 'ah',
+    'ऋ': 'ri', 'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au', 'अं': 'an', 'अः': 'ah',
+    'ऑ': 'o', 'ऍ': 'e',
     'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
     'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
     'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
@@ -95,9 +97,26 @@ DEVA_TO_LATIN = {
     'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v', 'w': 'w',
     'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h',
     'क़': 'q', 'ख़': 'kh', 'ग़': 'gh', 'ज़': 'z', 'फ़': 'f', 'ड़': 'r', 'ढ़': 'rh',
-    'ा': 'a', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo',
-    'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au',
+    'ा': 'a', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri', 'ॄ': 'ri',
+    'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au', 'ॉ': 'o', 'ॅ': 'e',
     'ं': 'n', 'ँ': 'n', 'ः': 'h', '्': '', 'ऽ': '',
+}
+
+_DEVA_CONSONANTS = {
+    'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
+    'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
+    'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
+    'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
+    'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm',
+    'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v',
+    'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h',
+    'क़': 'q', 'ख़': 'kh', 'ग़': 'gh', 'ज़': 'z', 'फ़': 'f', 'ड़': 'r', 'ढ़': 'rh',
+    'क\u093c': 'q', 'ख\u093c': 'kh', 'ग\u093c': 'gh', 'ज\u093c': 'z',
+    'फ\u093c': 'f', 'ड\u093c': 'r', 'ढ\u093c': 'rh',
+}
+_DEVA_MATRAS = {
+    'ा': 'a', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri', 'ॄ': 'ri',
+    'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au', 'ॉ': 'o', 'ॅ': 'e',
 }
 
 INDIC_DIGITS = str.maketrans('०१२३४५६७८९', '0123456789')
@@ -108,23 +127,77 @@ def normalize_text(s: str) -> str:
     s = s.translate(INDIC_DIGITS)
     return s.casefold()
 
+def _is_deva_letter(ch: str) -> bool:
+    return '\u0900' <= ch <= '\u097F'
+
 def rough_transliterate(text: str) -> str:
-    """Fast approximate Devanagari -> Latin transliteration."""
+    """Schwa-aware approximate Devanagari -> Latin transliteration."""
     result = []
     i = 0
     chars = list(text)
-    while i < len(chars):
-        # Try two-char combo first
-        if i + 1 < len(chars):
-            pair = chars[i] + chars[i+1]
-            if pair in DEVA_TO_LATIN:
-                result.append(DEVA_TO_LATIN[pair])
-                i += 2
+    n = len(chars)
+    while i < n:
+        # Handle common 3-char conjuncts: क्ष, त्र, ज्ञ, श्र
+        if i + 2 < n and chars[i + 1] == '\u094d':
+            tri = chars[i] + chars[i + 1] + chars[i + 2]
+            conj_map = {'क्ष': 'ksh', 'त्र': 'tr', 'ज्ञ': 'gy', 'श्र': 'shr'}
+            if tri in conj_map:
+                result.append(conj_map[tri])
+                i += 3
+                # Check if matra/halant follows conjunct
+                if i < n and chars[i] in _DEVA_MATRAS:
+                    result.append(_DEVA_MATRAS[chars[i]])
+                    i += 1
+                elif i < n and chars[i] == '\u094d':
+                    i += 1
+                elif i < n and _is_deva_letter(chars[i]) and chars[i] not in ('ं', 'ँ', 'ः'):
+                    result.append('a')
                 continue
+
+        # Check consonant (possibly with nukta \u093c)
+        c_key = None
+        step = 1
+        if i + 1 < n and chars[i + 1] == '\u093c' and (chars[i] + '\u093c') in _DEVA_CONSONANTS:
+            c_key = chars[i] + '\u093c'
+            step = 2
+        elif chars[i] in _DEVA_CONSONANTS:
+            c_key = chars[i]
+            step = 1
+
+        if c_key is not None:
+            result.append(_DEVA_CONSONANTS[c_key])
+            nxt_idx = i + step
+            if nxt_idx < n and chars[nxt_idx] == '\u094d':
+                # Virama suppresses inherent 'a'
+                i = nxt_idx + 1
+            elif nxt_idx < n and chars[nxt_idx] in _DEVA_MATRAS:
+                result.append(_DEVA_MATRAS[chars[nxt_idx]])
+                i = nxt_idx + 1
+            else:
+                # Inherent 'a' unless bare consonant at word-final position
+                at_word_end = (nxt_idx >= n) or (not _is_deva_letter(chars[nxt_idx]))
+                followed_by_mark_end = (
+                    nxt_idx < n and chars[nxt_idx] in ('ं', 'ँ', 'ः')
+                    and (nxt_idx + 1 >= n or not _is_deva_letter(chars[nxt_idx + 1]))
+                )
+                prev_was_reph = (i >= 2 and chars[i - 1] == '\u094d' and chars[i - 2] == 'र')
+                prev_was_halant = (i > 0 and chars[i - 1] == '\u094d' and not prev_was_reph)
+                if not at_word_end and not followed_by_mark_end:
+                    result.append('a')
+                elif prev_was_halant:
+                    result.append('a')
+                i = nxt_idx
+            continue
+
+        # Try remaining 2-char combos or single char from DEVA_TO_LATIN
+        if i + 1 < n and (chars[i] + chars[i + 1]) in DEVA_TO_LATIN:
+            result.append(DEVA_TO_LATIN[chars[i] + chars[i + 1]])
+            i += 2
+            continue
         c = chars[i]
         if c in DEVA_TO_LATIN:
             result.append(DEVA_TO_LATIN[c])
-        else:
+        elif c != '\u093c':
             result.append(c)
         i += 1
     return "".join(result)
@@ -138,30 +211,186 @@ def name_skeleton(name: str) -> str:
         return n
     # Transliterate Devanagari
     n = rough_transliterate(n)
+    # Remove punctuation before word-level normalization
+    n = re.sub(r'[.\-,\'\"()\[\]{}]', ' ', n)
+    n = ' '.join(n.split())
     # Expand abbreviations and variants
-    n = re.sub(r'\b(?:mohammad|mohammed|muhammad|muhammed|mohd\.?|md\.?|mohmmd)\b', 'mohammad', n)
-    n = re.sub(r'\bsmt\.?\b', '', n)
-    n = re.sub(r'\bshri\.?\b', '', n)
-    n = re.sub(r'\bsri\.?\b', '', n)
-    n = re.sub(r'\bश्री\.?\b', '', n)
-    n = re.sub(r'\bश्रीमती\.?\b', '', n)
-    # Remove honorifics
-    for h in ['ji', 'sahab', 'saheb', 'didi', 'bhai', 'babu', 'amma', 'ammi',
-              'bhabhi', 'chacha', 'mama', 'mausi', 'nana', 'nani', 'dada', 'dadi',
-              'behenji', 'behen', 'beta', 'beti', 'bibi', 'begum']:
-        n = re.sub(rf'\b{h}\b', '', n)
+    n = re.sub(r'\b(?:mohammad|mohammed|muhammad|muhammed|mohd|md|mohmmd)\b', 'mohammad', n)
+    for h in ['smt', 'shri', 'sri', 'श्री', 'श्रीमती',
+              'ji', 'sahab', 'saheb', 'didi', 'bhai', 'babu', 'amma', 'ammi',
+              'bhabhi', 'chacha', 'chachu', 'mama', 'mamaji', 'mausi', 'nana',
+              'nani', 'dada', 'dadi', 'behenji', 'behen', 'bhaiya', 'bhaiyya',
+              'beta', 'beti', 'bibi', 'begum', 'papa']:
+        n = re.sub(rf'\b{re.escape(h)}\b', '', n)
     # Phonetic and cross-script normalizations
+    n = re.sub(r'qu(?=[ie])', 'k', n)
+    n = n.replace('q', 'k')
     n = n.replace('ph', 'f')
     n = n.replace('w', 'v')
+    n = n.replace('ou', 'au')
     n = n.replace('aa', 'a')
     n = n.replace('ee', 'i')
     n = n.replace('oo', 'u')
+    n = n.replace('ei', 'i')
+    n = re.sub(r'(?:ey|eya)\b', 'e', n)
+    n = re.sub(r'([a-z]{3,})y\b', r'\1i', n)
     # Collapse double consonants
     n = re.sub(r'([b-df-hj-np-tv-z])\1+', r'\1', n)
-    # Remove dots, hyphens, extra spaces
-    n = re.sub(r'[.\-,\'\"()\[\]{}]', ' ', n)
     n = ' '.join(n.split())
     return n.strip()
+
+def _schwa_key(tok: str) -> str:
+    """Strip medial 'a' schwa vowels while preserving initial and final chars."""
+    if len(tok) <= 3:
+        return tok
+    return tok[0] + tok[1:-1].replace('a', '') + tok[-1]
+
+def _consonant_key(tok: str) -> str:
+    """Consonant skeleton normalizing dental th/dh and sibilant sh/s for Indic spelling variation."""
+    t = tok.replace('sh', 's').replace('th', 't').replace('dh', 'd')
+    return re.sub(r'[aeiou]', '', t)
+
+def _tokens_match(a: str, b: str) -> bool:
+    """Match two phonetic skeleton tokens across transliteration and schwa variants."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) < 4 or len(b) < 4:
+        return False
+    if a[0] != b[0]:
+        return False
+    if (a[-1] in 'aeiou') != (b[-1] in 'aeiou'):
+        return False
+    if _schwa_key(a) == _schwa_key(b):
+        return True
+    if _consonant_key(a) == _consonant_key(b):
+        return difflib.SequenceMatcher(None, a, b).ratio() >= 0.80
+    return False
+
+def _match_name_pair(name1: str, name2: str) -> str:
+    """Compare two names across scripts, word orders, and phonetic variants.
+    Returns: 'full', 'first', 'partial', or 'none'.
+    """
+    sk1 = name_skeleton(name1)
+    sk2 = name_skeleton(name2)
+    if not sk1 or not sk2:
+        return 'none'
+    toks1 = [t for t in sk1.split() if len(t) >= 2]
+    toks2 = [t for t in sk2.split() if len(t) >= 2]
+    if not toks1 or not toks2:
+        return 'none'
+    # Never let a standalone generic token (e.g. "Devi") match anything
+    if len(toks1) == 1 and toks1[0] in GENERIC_NAME_TOKENS:
+        return 'none'
+    if len(toks2) == 1 and toks2[0] in GENERIC_NAME_TOKENS:
+        return 'none'
+
+    # Order-independent bipartite greedy matching using phonetic equivalence
+    shorter, longer = (toks1, toks2) if len(toks1) <= len(toks2) else (toks2, toks1)
+    used = set()
+    matched_tokens = []
+    for t in shorter:
+        # Prefer exact match first, then phonetic match
+        idx = next((j for j, u in enumerate(longer) if j not in used and u == t), None)
+        if idx is None:
+            idx = next((j for j, u in enumerate(longer) if j not in used and _tokens_match(t, u)), None)
+        if idx is not None:
+            used.add(idx)
+            matched_tokens.append(t)
+
+    non_gen_matches = [t for t in matched_tokens if t not in GENERIC_NAME_TOKENS and len(t) >= 3]
+    if not non_gen_matches:
+        return 'none'
+
+    if len(matched_tokens) == len(shorter) and len(matched_tokens) == len(longer):
+        if len(shorter) >= 2 or (len(shorter) == 1 and len(shorter[0]) >= 4):
+            return 'full'
+    if len(matched_tokens) == len(shorter) and len(shorter) == 1 and len(longer) >= 2:
+        # Check if the single non-generic token matches the first (given) name of longer
+        if _tokens_match(shorter[0], longer[0]):
+            return 'first'
+        return 'partial'
+    if len(matched_tokens) == len(shorter) and len(shorter) >= 2:
+        return 'partial'
+    return 'none'
+
+def _location_match(loc1: str, loc2: str) -> bool:
+    """Cross-script village/location match."""
+    return _match_name_pair(loc1, loc2) == 'full'
+
+def _normalize_gender(val: str) -> str:
+    """Normalize English/Hindi gender strings to 'M', 'F', or ''."""
+    if not val:
+        return ''
+    v = normalize_text(str(val)).strip()
+    if v in ('m', 'male', 'man', 'boy', 'पुरुष', 'purush', 'लड़का') or v.startswith(('male', 'पुरुष')):
+        return 'M'
+    if v in ('f', 'female', 'woman', 'girl', 'महिला', 'स्त्री', 'mahila', 'लड़की') or v.startswith(('female', 'महिल')):
+        return 'F'
+    if v and v[0] in ('m', 'f'):
+        return v[0].upper()
+    return ''
+
+def _normalize_age(val: Any) -> int | None:
+    """Extract numeric age from strings like '47 वर्ष' or '51'."""
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        a = int(val)
+        return a if 0 <= a <= 125 else None
+    s = normalize_text(str(val))
+    m = re.search(r'\b(\d{1,3})\b', s)
+    if not m:
+        return None
+    a = int(m.group(1))
+    return a if 0 <= a <= 125 else None
+
+def _parse_dob(val: str) -> tuple[int, frozenset[tuple[int, int]]] | None:
+    """Parse DOB into (year, {(month, day), ...}) tolerating DMY/MDY ambiguity."""
+    if not val:
+        return None
+    s = normalize_text(str(val)).strip()
+    m = re.match(r'^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1900 <= y <= 2030 and 1 <= mo <= 12 and 1 <= d <= 31:
+            return (y, frozenset({(mo, d)}))
+        return None
+    m = re.match(r'^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$', s)
+    if m:
+        p1, p2, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if not (1900 <= y <= 2030):
+            return None
+        opts = set()
+        if 1 <= p2 <= 12 and 1 <= p1 <= 31:
+            opts.add((p2, p1))  # DD/MM/YYYY
+        if 1 <= p1 <= 12 and 1 <= p2 <= 31:
+            opts.add((p1, p2))  # MM/DD/YYYY
+        if opts:
+            return (y, frozenset(opts))
+    return None
+
+def _dobs_compatible(dob1: str, dob2: str) -> bool | None:
+    """Return True if parsed DOBs match, False if they conflict, None if inconclusive."""
+    p1 = _parse_dob(dob1)
+    p2 = _parse_dob(dob2)
+    if not p1 or not p2:
+        return None
+    if p1[0] != p2[0]:
+        return False
+    return bool(p1[1] & p2[1])
+
+def _mrn_kind_ns(val: str) -> tuple[str, str]:
+    """Classify an MRN into (kind, namespace).
+    kind: 'encounter' (IPD/ADM) or 'uhid' (patient UHID).
+    """
+    v = re.sub(r'\s+', '', str(val)).upper()
+    if re.match(r'^(?:DHH[/-]?IPD|IPD|IP|ADM)[/\-\d]', v):
+        return ('encounter', re.match(r'^([A-Z]+)', v).group(1))
+    m = re.match(r'^([A-Z]+)', v)
+    ns = m.group(1) if m else ''
+    return ('uhid', ns)
 
 # ---------------------------------------------------------------------------
 # Pseudonyms & dates
@@ -466,9 +695,12 @@ def classify_header(header: str) -> str | None:
         if h in header_set:
             return None
 
-    # 2. PII exact match: check RELATIVE_HEADERS before NAME_HEADERS
-    if any(h.startswith(pfx) for pfx in ('dob', 'date of birth', 'birth date', 'जन्म तिथि')):
+    # 2. PII exact match: DOB before generic date exclusion; check RELATIVE_HEADERS before NAME_HEADERS
+    if any(pfx in h for pfx in ('dob', 'date of birth', 'birth date', 'janm tithi', 'जन्म तिथि')):
         return 'DOB'
+    # Clinical/event dates (e.g. Registration Date, collected_on, reported_on, registered_on) are NOT MRN or RELATIVE_NAME
+    if any(w in h.split() for w in ('date', 'tithi', 'tarikh', 'तारीख', 'दिनांक', 'registered', 'collected', 'reported')) or h.endswith(' on'):
+        return None
     if 'pmjay' in h:
         return 'INSURANCE_ID'
     if h in RELATIVE_HEADERS:
@@ -480,17 +712,17 @@ def classify_header(header: str) -> str | None:
     # 3. Safe-type fuzzy match (e.g. "treating doctor", "consultant physician")
     for header_set in SAFE_HEADER_TYPES:
         for known in header_set:
-            if len(known) >= 3 and (known in h or h == known):
+            if len(known) >= 3 and re.search(rf'(?:^| ){re.escape(known)}(?: |$)', h):
                 return None
 
-    # 4. Fuzzy: check RELATIVE_HEADERS before NAME_HEADERS
+    # 4. Fuzzy: check RELATIVE_HEADERS before NAME_HEADERS, using word boundaries for short keys
     for known in RELATIVE_HEADERS:
-        if len(known) >= 3 and (known in h or h == known):
+        if re.search(rf'(?:^| ){re.escape(known)}(?: |$)', h) or (len(known) >= 6 and ' ' not in known and known in h):
             return 'RELATIVE_NAME'
 
     for header_set, pii_type in PII_HEADER_MAP.items():
         for known in header_set:
-            if len(known) >= 4 and (known in h or h == known):
+            if re.search(rf'(?:^| ){re.escape(known)}(?: |$)', h) or (len(known) >= 5 and ' ' not in known and known in h):
                 return pii_type
 
     return None
@@ -1479,12 +1711,56 @@ class PatientCluster:
     def add_evidence(self, record_id: str, ev: dict[str, Any]):
         self.evidence[record_id] = ev
 
-    def _records_contradict(self, rid1: str, rid2: str) -> bool:
-        """Check if two records contradict each other (negative evidence constraint)."""
+    @staticmethod
+    def _candidate_names(ev: dict[str, Any]) -> list[str]:
+        return [n for n in (ev.get('patient_name', ''), ev.get('patient_name_alt', '')) if n]
+
+    @staticmethod
+    def _candidate_rels(ev: dict[str, Any]) -> list[str]:
+        return [r for r in (ev.get('relative_name', ''), ev.get('relative_name_alt', '')) if r]
+
+    @staticmethod
+    def _best_name_match(names1: list[str], names2: list[str]) -> str:
+        order = {'none': 0, 'partial': 1, 'first': 2, 'full': 3}
+        best = 'none'
+        for n1 in names1:
+            for n2 in names2:
+                res = _match_name_pair(n1, n2)
+                if order[res] > order[best]:
+                    best = res
+                    if best == 'full':
+                        return 'full'
+        return best
+
+    @staticmethod
+    def _record_mrns(ev: dict[str, Any]) -> list[str]:
+        mrns = []
+        if ev.get('mrns'):
+            mrns.extend(ev['mrns'])
+        if ev.get('uhid'):
+            mrns.append(str(ev['uhid']))
+        # Preserve unique normalized order
+        seen = set()
+        out = []
+        for m in mrns:
+            nm = re.sub(r'[\s\-/]', '', str(m)).lower()
+            if nm and nm not in seen:
+                seen.add(nm)
+                out.append(str(m))
+        return out
+
+    def _shares_any_mrn(self, ev1: dict[str, Any], ev2: dict[str, Any]) -> bool:
+        m1 = {re.sub(r'[\s\-/]', '', m).lower() for m in self._record_mrns(ev1)}
+        m2 = {re.sub(r'[\s\-/]', '', m).lower() for m in self._record_mrns(ev2)}
+        return bool(m1 & m2)
+
+    def _hard_contradict(self, rid1: str, rid2: str) -> bool:
+        """Check strict pairwise contradictions (national IDs, gender, DOB, age, uncorroborated family phone)."""
         ev1 = self.evidence.get(rid1, {})
         ev2 = self.evidence.get(rid2, {})
 
-        # 1. Contradicting unique IDs
+        # 1. Contradicting global unique IDs (Aadhaar, PAN, ABHA)
+        has_shared_global = False
         for id_field in ('aadhaar', 'pan', 'abha'):
             v1, v2 = ev1.get(id_field), ev2.get(id_field)
             if v1 and v2:
@@ -1492,122 +1768,297 @@ class PatientCluster:
                 n2 = re.sub(r'[\s\-/]', '', str(v2)).lower()
                 if n1 != n2:
                     return True
+                has_shared_global = True
 
-        u1, u2 = ev1.get('uhid'), ev2.get('uhid')
-        if u1 and u2:
-            n1 = re.sub(r'[\s\-/]', '', str(u1)).lower()
-            n2 = re.sub(r'[\s\-/]', '', str(u2)).lower()
-            if n1 != n2:
-                return True
-
-        # 2. Gender contradiction
-        g1, g2 = ev1.get('gender'), ev2.get('gender')
-        if g1 and g2 and g1.upper() != g2.upper():
+        # 2. Gender contradiction (normalized across scripts)
+        g1 = _normalize_gender(ev1.get('gender', ''))
+        g2 = _normalize_gender(ev2.get('gender', ''))
+        if g1 and g2 and g1 != g2:
             return True
 
-        # 3. Age contradiction (> 5 years gap is impossible for same patient)
-        a1, a2 = ev1.get('age'), ev2.get('age')
-        if a1 and a2:
-            try:
-                if abs(int(a1) - int(a2)) > 5:
-                    return True
-            except (ValueError, TypeError):
-                pass
+        # 3. DOB contradiction
+        d1, d2 = ev1.get('dob', ''), ev2.get('dob', '')
+        dob_compat = _dobs_compatible(d1, d2) if (d1 and d2) else None
+        if dob_compat is False:
+            return True
 
-        # 4. Family phone trap: same phone but distinct name skeletons and no matching relative
+        # 4. Age contradiction (> 5 years gap is impossible for same patient)
+        a1 = _normalize_age(ev1.get('age'))
+        a2 = _normalize_age(ev2.get('age'))
+        if a1 is not None and a2 is not None and abs(a1 - a2) > 5:
+            return True
+
+        # 4b. Cross-check DOB birth year against reported age
+        for dob_val, age_val in ((d1, a2), (d2, a1)):
+            if dob_val and age_val is not None:
+                parsed = _parse_dob(dob_val)
+                if parsed:
+                    byear = parsed[0]
+                    min_plausible = (2020 - byear) - 3
+                    max_plausible = (2027 - byear) + 3
+                    if age_val < min_plausible or age_val > max_plausible:
+                        return True
+
+        # 5. Family phone trap: same phone without shared national/MRN ID, distinct names, no relative match
         p1, p2 = ev1.get('phone'), ev2.get('phone')
-        if p1 and p2 and p1 == p2:
-            name1, name2 = ev1.get('patient_name'), ev2.get('patient_name')
-            if name1 and name2:
-                sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
-                tokens1 = set(sk1.split()) if sk1 else set()
-                tokens2 = set(sk2.split()) if sk2 else set()
-                names_match = bool(sk1 and sk2 and (sk1 == sk2 or (tokens1 and tokens2 and (tokens1.issubset(tokens2) or tokens2.issubset(tokens1)))))
-                if sk1 and sk2 and not names_match:
-                    rel1, rel2 = ev1.get('relative_name'), ev2.get('relative_name')
-                    rel_match = False
-                    if rel1 and rel2:
-                        rsk1, rsk2 = name_skeleton(rel1), name_skeleton(rel2)
-                        rtok1 = set(rsk1.split()) if rsk1 else set()
-                        rtok2 = set(rsk2.split()) if rsk2 else set()
-                        if rsk1 and rsk2 and (rsk1 == rsk2 or (rtok1 and rtok2 and (rtok1.issubset(rtok2) or rtok2.issubset(rtok1)))):
-                            rel_match = True
-                    if not rel_match:
+        if p1 and p2 and p1 == p2 and not has_shared_global and not self._shares_any_mrn(ev1, ev2):
+            names1 = self._candidate_names(ev1)
+            names2 = self._candidate_names(ev2)
+            if names1 and names2:
+                nm = self._best_name_match(names1, names2)
+                if nm == 'none':
+                    rels1 = self._candidate_rels(ev1)
+                    rels2 = self._candidate_rels(ev2)
+                    rm = self._best_name_match(rels1, rels2) if (rels1 and rels2) else 'none'
+                    if rm == 'none':
                         return True
 
         return False
 
+    def _sets_uhid_conflict(self, rids1: set[str], rids2: set[str]) -> bool:
+        """Check whether two record sets have conflicting same-hospital UHIDs without strong corroboration."""
+        uhids1: dict[str, set[str]] = {}
+        uhids2: dict[str, set[str]] = {}
+        globals1: dict[str, set[str]] = defaultdict(set)
+        globals2: dict[str, set[str]] = defaultdict(set)
+        phones1, phones2 = set(), set()
+        names1, names2, rels1, rels2, vills1, vills2, dobs1, dobs2 = [], [], [], [], [], [], [], []
+
+        for rset, uhids, globs, phones, names, rels, vills, dobs in (
+            (rids1, uhids1, globals1, phones1, names1, rels1, vills1, dobs1),
+            (rids2, uhids2, globals2, phones2, names2, rels2, vills2, dobs2),
+        ):
+            for rid in rset:
+                ev = self.evidence.get(rid, {})
+                for m in self._record_mrns(ev):
+                    kind, ns = _mrn_kind_ns(m)
+                    if kind == 'uhid' and ns:
+                        uhids.setdefault(ns, set()).add(re.sub(r'[\s\-/]', '', m).lower())
+                for gf in ('aadhaar', 'pan', 'abha', 'insurance', 'email'):
+                    gv = ev.get(gf)
+                    if gv:
+                        globs[gf].add(re.sub(r'[\s\-/]', '', str(gv)).lower())
+                if ev.get('phone'):
+                    phones.add(ev['phone'])
+                names.extend(self._candidate_names(ev))
+                rels.extend(self._candidate_rels(ev))
+                if ev.get('village'):
+                    vills.append(ev['village'])
+                if ev.get('dob'):
+                    dobs.append(ev['dob'])
+
+        shared_ns = set(uhids1) & set(uhids2)
+        if not shared_ns:
+            return False
+        for ns in shared_ns:
+            if not (uhids1[ns] & uhids2[ns]):
+                # Different UHIDs in the same hospital namespace: require shared global ID OR strong phone+corrob
+                for gf in ('aadhaar', 'pan', 'abha', 'insurance', 'email'):
+                    if globals1[gf] & globals2[gf]:
+                        return False
+                if phones1 & phones2:
+                    nm = self._best_name_match(names1, names2)
+                    rm = self._best_name_match(rels1, rels2)
+                    vm = any(_location_match(v1, v2) for v1 in vills1 for v2 in vills2)
+                    dm = any(_dobs_compatible(d1, d2) is True for d1 in dobs1 for d2 in dobs2)
+                    if nm == 'full' and (dm or rm != 'none' or vm):
+                        return False
+                return True
+        return False
+
+    def _records_contradict(self, rid1: str, rid2: str) -> bool:
+        """Check if two records contradict each other (negative evidence constraint)."""
+        return self._hard_contradict(rid1, rid2) or self._sets_uhid_conflict({rid1}, {rid2})
+
     def _cluster_contradicts(self, cluster_key: str, rid: str) -> bool:
-        """Check if rid contradicts any member of cluster."""
-        return any(self._records_contradict(rid, m) for m in self.clusters.get(cluster_key, set()))
+        """Check if rid contradicts cluster (hard contradiction with any member or same-NS UHID conflict)."""
+        members = self.clusters.get(cluster_key, set())
+        if any(self._hard_contradict(rid, m) for m in members):
+            return True
+        return self._sets_uhid_conflict(members, {rid})
+
+    def _clusters_contradict(self, c1: str, c2: str) -> bool:
+        """Check if two clusters contradict each other."""
+        m1 = self.clusters.get(c1, set())
+        m2 = self.clusters.get(c2, set())
+        if any(self._hard_contradict(r1, r2) for r1 in m1 for r2 in m2):
+            return True
+        return self._sets_uhid_conflict(m1, m2)
+
+    def _build_cluster_profile(self, cluster_key: str) -> dict[str, Any]:
+        """Pool validated identifying evidence across all records in a cluster."""
+        names: list[str] = []
+        relatives: list[str] = []
+        villages: list[str] = []
+        pins: list[str] = []
+        ages: list[int] = []
+        dobs: list[str] = []
+        genders: set[str] = set()
+
+        for m in self.clusters.get(cluster_key, set()):
+            ev = self.evidence.get(m, {})
+            for n in self._candidate_names(ev):
+                if n not in names:
+                    names.append(n)
+            for r in self._candidate_rels(ev):
+                if r not in relatives:
+                    relatives.append(r)
+            v = ev.get('village', '')
+            if v and v not in villages:
+                villages.append(v)
+            p = ev.get('pin', '')
+            if p and str(p) not in pins:
+                pins.append(str(p))
+            a = _normalize_age(ev.get('age'))
+            if a is not None:
+                ages.append(a)
+            d = ev.get('dob', '')
+            if d and d not in dobs:
+                dobs.append(d)
+            g = _normalize_gender(ev.get('gender', ''))
+            if g:
+                genders.add(g)
+
+        return {
+            'names': names,
+            'relatives': relatives,
+            'villages': villages,
+            'pins': pins,
+            'ages': ages,
+            'dobs': dobs,
+            'genders': genders,
+        }
+
+    def _score_against_profile(self, ev: dict[str, Any], prof: dict[str, Any]) -> float:
+        """Compute weighted evidence score between an unlinked record and a cluster profile."""
+        ev_names = self._candidate_names(ev)
+        if not ev_names or not prof['names']:
+            return 0.0
+
+        name_match = self._best_name_match(ev_names, prof['names'])
+        if name_match == 'none':
+            return 0.0
+
+        score = 0.0
+        # Patient name score
+        best_tok_count = max(len(name_skeleton(n).split()) for n in ev_names)
+        if name_match == 'full':
+            name_pts = 0.45 if best_tok_count >= 2 else 0.35
+        elif name_match == 'first':
+            name_pts = 0.30
+        else:
+            name_pts = 0.25
+        score += name_pts
+
+        # Relative name score
+        ev_rels = self._candidate_rels(ev)
+        rel_pts = 0.0
+        if ev_rels and prof['relatives']:
+            rel_match = self._best_name_match(ev_rels, prof['relatives'])
+            if rel_match in ('full', 'first', 'partial'):
+                rel_pts = 0.35
+        score += rel_pts
+
+        # Village / Location / PIN prefix
+        v1 = ev.get('village', '')
+        p1 = ev.get('pin', '')
+        vill_match = bool(v1 and any(_location_match(v1, v2) for v2 in prof['villages']))
+        pin_match = bool(p1 and any(str(p1)[:3] == str(p2)[:3] for p2 in prof['pins']))
+        if vill_match:
+            score += 0.25
+        elif pin_match:
+            score += 0.10
+
+        # DOB / Age score
+        dob1 = ev.get('dob', '')
+        age1 = _normalize_age(ev.get('age'))
+        dob_match = bool(dob1 and any(_dobs_compatible(dob1, d2) is True for d2 in prof['dobs']))
+        if dob_match:
+            score += 0.25
+        elif age1 is not None:
+            diffs = [abs(age1 - a2) for a2 in prof['ages']]
+            if not diffs and prof['dobs']:
+                # Infer approximate age from birth year if age not directly recorded
+                for d2 in prof['dobs']:
+                    parsed = _parse_dob(d2)
+                    if parsed:
+                        by = parsed[0]
+                        diffs.extend([abs(age1 - (2025 - by)), abs(age1 - (2026 - by))])
+            if diffs:
+                min_diff = min(diffs)
+                if min_diff == 0:
+                    score += 0.18
+                elif min_diff <= 2:
+                    score += 0.14
+                elif min_diff <= 3:
+                    score += 0.10
+                elif min_diff <= 5:
+                    score += 0.05
+
+        # Gender corroboration only when paired with name + at least one other clue
+        g1 = _normalize_gender(ev.get('gender', ''))
+        if g1 and g1 in prof['genders'] and name_pts >= 0.30 and (rel_pts > 0 or vill_match or dob_match):
+            score += 0.15
+
+        return round(min(1.0, score), 3)
 
     def _compute_link_score(self, rid1: str, rid2: str) -> float:
         """Compute weighted evidence score between two records in [0.0, 1.0]."""
         if self._records_contradict(rid1, rid2):
             return 0.0
-
         ev1 = self.evidence.get(rid1, {})
         ev2 = self.evidence.get(rid2, {})
-        score = 0.0
-
-        # Patient name skeleton (weight 0.35)
-        name1, name2 = ev1.get('patient_name', ''), ev2.get('patient_name', '')
-        if name1 and name2:
-            sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
-            if sk1 and sk2:
-                tokens1, tokens2 = set(sk1.split()), set(sk2.split())
-                if sk1 == sk2 or (tokens1 and tokens2 and tokens1 == tokens2):
-                    score += 0.35
-                elif (tokens1 and tokens2 and (tokens1.issubset(tokens2) or tokens2.issubset(tokens1))) or sk1 in sk2 or sk2 in sk1:
-                    score += 0.25
-
-        # Relative name skeleton (weight 0.30)
-        rel1, rel2 = ev1.get('relative_name', ''), ev2.get('relative_name', '')
-        if rel1 and rel2:
-            rsk1, rsk2 = name_skeleton(rel1), name_skeleton(rel2)
-            if rsk1 and rsk2:
-                if rsk1 == rsk2:
-                    score += 0.30
-                elif rsk1 in rsk2 or rsk2 in rsk1:
-                    score += 0.15
-
-        # Village / Locality / PIN prefix (weight 0.20)
-        v1, v2 = ev1.get('village', ''), ev2.get('village', '')
-        p1, p2 = ev1.get('pin', ''), ev2.get('pin', '')
-        if v1 and v2 and normalize_text(v1) == normalize_text(v2):
-            score += 0.20
-        elif p1 and p2 and str(p1)[:3] == str(p2)[:3]:
-            score += 0.10
-
-        # Age match (weight 0.15)
-        a1, a2 = ev1.get('age'), ev2.get('age')
-        if a1 and a2:
-            try:
-                diff = abs(int(a1) - int(a2))
-                if diff == 0:
-                    score += 0.15
-                elif diff <= 2:
-                    score += 0.10
-                elif diff <= 5:
-                    score += 0.05
-            except (ValueError, TypeError):
-                pass
-
-        return round(score, 3)
+        prof2 = {
+            'names': self._candidate_names(ev2),
+            'relatives': self._candidate_rels(ev2),
+            'villages': [ev2['village']] if ev2.get('village') else [],
+            'pins': [str(ev2['pin'])] if ev2.get('pin') else [],
+            'ages': [a] if (a := _normalize_age(ev2.get('age'))) is not None else [],
+            'dobs': [ev2['dob']] if ev2.get('dob') else [],
+            'genders': {g} if (g := _normalize_gender(ev2.get('gender', ''))) else set(),
+        }
+        return self._score_against_profile(ev1, prof2)
 
     def _score_record_against_cluster(self, rid: str, cluster_key: str) -> float:
-        """Compute max evidence score of rid against members of cluster_key (0.0 if any contradicts)."""
+        """Compute evidence score of rid against pooled cluster profile (0.0 if any member contradicts)."""
         if self._cluster_contradicts(cluster_key, rid):
             return 0.0
-        scores = [self._compute_link_score(rid, m) for m in self.clusters[cluster_key]]
-        return max(scores) if scores else 0.0
+        ev = self.evidence.get(rid, {})
+        prof = self._build_cluster_profile(cluster_key)
+        return self._score_against_profile(ev, prof)
+
+    def _merge_pair(self, r1: str, r2: str) -> None:
+        c1 = self.record_to_cluster.get(r1)
+        c2 = self.record_to_cluster.get(r2)
+        if c1 is None and c2 is None:
+            canonical = r1
+            self.clusters[canonical] = {r1, r2}
+            self.record_to_cluster[r1] = canonical
+            self.record_to_cluster[r2] = canonical
+        elif c1 is not None and c2 is None:
+            if not self._cluster_contradicts(c1, r2):
+                self.clusters[c1].add(r2)
+                self.record_to_cluster[r2] = c1
+        elif c1 is None and c2 is not None:
+            if not self._cluster_contradicts(c2, r1):
+                self.clusters[c2].add(r1)
+                self.record_to_cluster[r1] = c2
+        elif c1 is not None and c2 is not None and c1 != c2:
+            if not self._clusters_contradict(c1, c2):
+                self.clusters[c1].update(self.clusters.pop(c2, set()))
+                for m in list(self.clusters[c1]):
+                    self.record_to_cluster[m] = c1
 
     def link(self):
         """Link records using multi-pass blocking, negative evidence, and candidate margin scoring."""
-        # Pass 1: Strong unique government and hospital IDs
+        # Pass 1: Strong unique government, hospital UHIDs, encounter IPD/ADM IDs, and personal email
         id_groups: dict[str, list[str]] = defaultdict(list)
         for rid, ev in self.evidence.items():
-            for id_type in ('uhid', 'aadhaar', 'abha', 'pan', 'insurance'):
+            for val in self._record_mrns(ev):
+                val_n = re.sub(r'[\s\-/]', '', str(val)).lower()
+                if val_n and len(val_n) >= 4:
+                    id_groups[f"mrn:{val_n}"].append(rid)
+            for id_type in ('aadhaar', 'abha', 'pan', 'insurance', 'email'):
                 val = ev.get(id_type)
                 if val:
                     val_n = re.sub(r'[\s\-/]', '', str(val)).lower()
@@ -1622,26 +2073,7 @@ class PatientCluster:
                     r1, r2 = rids[i], rids[j]
                     if self._records_contradict(r1, r2):
                         continue
-                    c1 = self.record_to_cluster.get(r1)
-                    c2 = self.record_to_cluster.get(r2)
-                    if c1 is None and c2 is None:
-                        canonical = r1
-                        self.clusters[canonical] = {r1, r2}
-                        self.record_to_cluster[r1] = canonical
-                        self.record_to_cluster[r2] = canonical
-                    elif c1 is not None and c2 is None:
-                        if not self._cluster_contradicts(c1, r2):
-                            self.clusters[c1].add(r2)
-                            self.record_to_cluster[r2] = c1
-                    elif c1 is None and c2 is not None:
-                        if not self._cluster_contradicts(c2, r1):
-                            self.clusters[c2].add(r1)
-                            self.record_to_cluster[r1] = c2
-                    elif c1 is not None and c2 is not None and c1 != c2:
-                        if not any(self._cluster_contradicts(c1, m) for m in self.clusters[c2]):
-                            self.clusters[c1].update(self.clusters.pop(c2, set()))
-                            for m in list(self.clusters[c1]):
-                                self.record_to_cluster[m] = c1
+                    self._merge_pair(r1, r2)
 
         # Pass 2: Phone number with corroboration (guard against family phone trap)
         phone_groups: dict[str, list[str]] = defaultdict(list)
@@ -1650,72 +2082,43 @@ class PatientCluster:
             if p and len(p) >= 10:
                 phone_groups[p].append(rid)
 
+        use_neg = POLICY.get("enable_negative_evidence", True)
         for phone, rids in phone_groups.items():
             if len(rids) < 2:
                 continue
             for i in range(len(rids)):
                 for j in range(i + 1, len(rids)):
                     r1, r2 = rids[i], rids[j]
-                    use_neg = POLICY.get("enable_negative_evidence", True)
                     if use_neg and self._records_contradict(r1, r2):
                         continue
-                    # Must share name skeleton OR relative OR close age / location
                     ev1, ev2 = self.evidence.get(r1, {}), self.evidence.get(r2, {})
-                    sk1 = name_skeleton(ev1.get('patient_name', ''))
-                    sk2 = name_skeleton(ev2.get('patient_name', ''))
-                    rel1 = name_skeleton(ev1.get('relative_name', ''))
-                    rel2 = name_skeleton(ev2.get('relative_name', ''))
-                    a1, a2 = ev1.get('age'), ev2.get('age')
-                    close_age = False
-                    if a1 and a2:
-                        try:
-                            close_age = abs(int(a1) - int(a2)) <= 2
-                        except (ValueError, TypeError):
-                            pass
-                    tokens1 = set(sk1.split()) if sk1 else set()
-                    tokens2 = set(sk2.split()) if sk2 else set()
-                    name_overlap = bool(tokens1 and tokens2 and (tokens1 == tokens2 or tokens1.issubset(tokens2) or tokens2.issubset(tokens1) or sk1 in sk2 or sk2 in sk1))
-                    has_corrob = (
-                        name_overlap or
-                        (rel1 and rel2 and rel1 == rel2) or
-                        (ev1.get('village') and ev2.get('village') and normalize_text(ev1['village']) == normalize_text(ev2['village'])) or
-                        close_age
-                    )
+                    name_overlap = self._best_name_match(self._candidate_names(ev1), self._candidate_names(ev2)) != 'none'
+                    rel_overlap = self._best_name_match(self._candidate_rels(ev1), self._candidate_rels(ev2)) != 'none'
+                    v1, v2 = ev1.get('village', ''), ev2.get('village', '')
+                    vill_overlap = bool(v1 and v2 and _location_match(v1, v2))
+                    dob_overlap = bool(ev1.get('dob') and ev2.get('dob') and _dobs_compatible(ev1['dob'], ev2['dob']) is True)
+                    a1, a2 = _normalize_age(ev1.get('age')), _normalize_age(ev2.get('age'))
+                    close_age = (a1 is not None and a2 is not None and abs(a1 - a2) <= 3)
+                    has_corrob = name_overlap or rel_overlap or vill_overlap or dob_overlap or close_age
                     if use_neg and not has_corrob:
                         continue
-
-                    c1 = self.record_to_cluster.get(r1)
-                    c2 = self.record_to_cluster.get(r2)
-                    if c1 is None and c2 is None:
-                        canonical = r1
-                        self.clusters[canonical] = {r1, r2}
-                        self.record_to_cluster[r1] = canonical
-                        self.record_to_cluster[r2] = canonical
-                    elif c1 is not None and c2 is None:
-                        if not self._cluster_contradicts(c1, r2):
-                            self.clusters[c1].add(r2)
-                            self.record_to_cluster[r2] = c1
-                    elif c1 is None and c2 is not None:
-                        if not self._cluster_contradicts(c2, r1):
-                            self.clusters[c2].add(r1)
-                            self.record_to_cluster[r1] = c2
-                    elif c1 is not None and c2 is not None and c1 != c2:
-                        if not any(self._cluster_contradicts(c1, m) for m in self.clusters[c2]):
-                            self.clusters[c1].update(self.clusters.pop(c2, set()))
-                            for m in list(self.clusters[c1]):
-                                self.record_to_cluster[m] = c1
+                    self._merge_pair(r1, r2)
 
         # Pass 3: Candidate Margin Scoring for Unlinked Fragments (Technique 3)
         strong_threshold = float(POLICY.get("link_strong_threshold", 0.8))
         margin = float(POLICY.get("link_margin", 0.2))
 
         unlinked = [rid for rid in self.evidence if rid not in self.record_to_cluster]
+        cluster_profiles = {ckey: self._build_cluster_profile(ckey) for ckey in self.clusters}
         for rid in unlinked:
             if not self.clusters:
                 break
+            ev = self.evidence.get(rid, {})
             cluster_scores: list[tuple[float, str]] = []
-            for ckey in list(self.clusters.keys()):
-                score = self._score_record_against_cluster(rid, ckey)
+            for ckey, prof in cluster_profiles.items():
+                if self._cluster_contradicts(ckey, rid):
+                    continue
+                score = self._score_against_profile(ev, prof)
                 if score > 0.0:
                     cluster_scores.append((score, ckey))
 
@@ -1731,6 +2134,7 @@ class PatientCluster:
                 if not self._cluster_contradicts(best_cluster, rid):
                     self.clusters[best_cluster].add(rid)
                     self.record_to_cluster[rid] = best_cluster
+                    cluster_profiles[best_cluster] = self._build_cluster_profile(best_cluster)
 
     def get_pseudonym(self, record_id: str) -> str | None:
         """Get pseudonym for a record, or None if unlinked."""
@@ -1743,10 +2147,30 @@ class PatientCluster:
 # ---------------------------------------------------------------------------
 # Evidence extraction
 # ---------------------------------------------------------------------------
+def _add_mrn_to_ev(ev: dict[str, Any], val: str) -> None:
+    """Record an MRN/UHID/IPD into ev['mrns'] and prefer hospital UHID in ev['uhid']."""
+    v = str(val).strip()
+    if not v or len(re.sub(r'[\s\-/]', '', v)) < 4:
+        return
+    # Never record dates as MRNs
+    if re.match(r'^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$', v):
+        return
+    mrns = ev.setdefault('mrns', [])
+    if v not in mrns:
+        mrns.append(v)
+    kind, _ = _mrn_kind_ns(v)
+    if 'uhid' not in ev or (kind == 'uhid' and _mrn_kind_ns(ev['uhid'])[0] == 'encounter'):
+        ev['uhid'] = v
+
+
 def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[str | None] | None = None) -> dict[str, Any]:
     """Extract linkage evidence from a CSV row."""
     ev: dict[str, Any] = {}
     h_map = {normalize_text(h): i for i, h in enumerate(headers)}
+    first_name = ''
+    last_name = ''
+    local_name = ''
+    generic_name = ''
 
     for h, i in h_map.items():
         if i >= len(row):
@@ -1755,25 +2179,33 @@ def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[
         if not val:
             continue
 
+        h_clean = re.sub(r'[_\-./]', ' ', h).strip()
         h_type = header_types[i] if header_types and i < len(header_types) else classify_header(headers[i])
         if h_type == 'PATIENT_NAME':
-            ev['patient_name'] = val
+            if h_clean in ('first name', 'firstname', 'first', 'fname', 'given'):
+                first_name = val
+            elif h_clean in ('last name', 'lastname', 'last', 'lname', 'family', 'surname'):
+                last_name = val
+            elif h_clean in ('local name', 'local'):
+                local_name = val
+            else:
+                generic_name = val
         elif h_type == 'RELATIVE_NAME':
             ev['relative_name'] = val
         elif h_type == 'PHONE':
-            digits = re.sub(r'\D', '', val)
+            digits = re.sub(r'\D', '', normalize_text(val))
             if len(digits) >= 10:
                 ev['phone'] = digits[-10:]
-            else:
+            elif digits:
                 ev['phone'] = digits
         elif h_type == 'AADHAAR':
-            digits = re.sub(r'\D', '', val)
-            if len(digits) >= 8:  # Not fully masked
+            digits = re.sub(r'\D', '', normalize_text(val))
+            if len(digits) == 12:  # Full 12 digits only (exclude masked XXXX...1234)
                 ev['aadhaar'] = digits
         elif h_type == 'ABHA_NUMBER':
-            ev['abha'] = val
+            ev['abha'] = normalize_text(val)
         elif h_type == 'MRN':
-            ev['uhid'] = val
+            _add_mrn_to_ev(ev, val)
         elif h_type == 'EMAIL':
             ev['email'] = val
         elif h_type == 'PAN':
@@ -1782,20 +2214,42 @@ def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[
             ev['insurance'] = val
         elif h_type == 'VILLAGE':
             ev['village'] = val
+        elif h_type == 'PIN':
+            pin_digits = re.sub(r'\D', '', normalize_text(val))
+            if len(pin_digits) == 6:
+                ev['pin'] = pin_digits
         elif h_type == 'DOB':
-            ev['dob'] = val
+            ev['dob'] = normalize_text(val)
 
-        # Safe fields
-        if h in {'age', 'umar', 'उम्र', 'आयु'}:
-            ev['age'] = val
-        if h in {'gender', 'sex', 'ling', 'लिंग'}:
-            ev['gender'] = val.upper()[:1] if val else ''
+        if h_clean in {'age', 'umar', 'उम्र', 'आयु'}:
+            age_num = _normalize_age(val)
+            if age_num is not None:
+                ev['age'] = str(age_num)
+        elif h_clean in {'age sex', 'age gender'}:
+            m_as = re.match(r'^(\d{1,3})\s*/\s*([MFmf])$', normalize_text(val))
+            if m_as:
+                ev['age'] = m_as.group(1)
+                ev['gender'] = m_as.group(2).upper()
+        if h_clean in {'gender', 'sex', 'ling', 'लिंग'}:
+            g = _normalize_gender(val)
+            if g:
+                ev['gender'] = g
 
-    # Try to extract UHID from first column if it looks like one
+    if generic_name:
+        ev['patient_name'] = generic_name
+    elif first_name or last_name:
+        ev['patient_name'] = f"{first_name} {last_name}".strip()
+    if local_name:
+        if 'patient_name' not in ev:
+            ev['patient_name'] = local_name
+        elif normalize_text(local_name) != normalize_text(ev['patient_name']):
+            ev['patient_name_alt'] = local_name
+
+    # Extract UHID from first column if it looks like an MRN
     if headers and row:
         first_val = row[0].strip()
         if RE_MRN.match(first_val):
-            ev.setdefault('uhid', first_val)
+            _add_mrn_to_ev(ev, first_val)
 
     return ev
 
@@ -1803,83 +2257,165 @@ def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[
 def extract_evidence_text(text: str) -> dict[str, Any]:
     """Extract linkage evidence from free text."""
     ev: dict[str, Any] = {}
+    text_norm = text.translate(INDIC_DIGITS)
 
-    # Patient name
-    m = re.search(r'(?i)(?:patient\s*(?:name)?|rogi\s*(?:ka\s*)?naam|रोगी\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text)
+    # 1. Explicit patient name cues
+    m = re.search(
+        r'(?i)(?:patient\s+name|patient\s*:|rogi\s*(?:ka\s*)?naam|रोगी\s*(?:का\s*)?नाम|मरीज़?\s*(?:का\s*)?नाम)\s*:?[ \t]*([^\n,;|]+)',
+        text
+    )
+    if not m:
+        m = re.search(r'(?im)^(?:name|full\s*name|naam|नाम)\s*:[ \t]*([^\n,;|]+)', text)
     if m:
-        ev['patient_name'] = m.group(1).strip()
-    else:
-        # Also check honorific name mention: "Arif sahab ka BP..."
-        m2 = re.search(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,}\s+(?:sahab|sahib|ji|didi|bhaiya|babu|साहब|जी|दीदी|भैया|बाबू))\b', text)
+        raw_val = m.group(1)
+        cand = re.split(r'(?i)[ \t]{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b|(?:आयु|उम्र)\s*:', raw_val)[0].strip()
+        if cand and len(cand) > 1 and not re.match(r'^(?:presents|admitted|complaining|reported|referred|diagnosed|is|was|ne)\b', cand, re.I):
+            ev['patient_name'] = cand
+
+    if 'patient_name' not in ev:
+        # WhatsApp "Report of <Name>  48 Y / F" before looking at sender line
+        m_rep = re.search(
+            r'(?i)\b(?:report\s+of|patient\s+report\s+for)[ \t]+([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F \t]{1,40}?)(?=[ \t]+\d{1,3}[ \t]*[Yy]|[ \t]*[,;|\n]|$)',
+            text
+        )
+        if m_rep:
+            cand = m_rep.group(1).strip()
+            if cand and normalize_text(cand) not in DOCTOR_NAMES and normalize_text(cand) not in MEDICAL_TERMS:
+                ev['patient_name'] = cand
+
+    if 'patient_name' not in ev:
+        # Nursing notes: "14:00 - Shanthi Chaudhary - K/C/O ..."
+        m_kco = re.search(r'(?m)^[ \t]*(?:\d{1,2}:\d{2}[ \t]*-[ \t]*)([A-Z][a-zA-Z.]+(?:[ \t]+[A-Z][a-zA-Z.]+){1,2})[ \t]*-[ \t]*[kKhH]/[cC]/[oO]\b', text)
+        if m_kco:
+            cand = m_kco.group(1).strip()
+            if cand and normalize_text(cand) not in DOCTOR_NAMES and normalize_text(cand) not in MEDICAL_TERMS:
+                ev['patient_name'] = cand
+
+    if 'patient_name' not in ev:
+        # Patient before relation cue at line start: "Asha, W/o Kamal, ..."
+        m_rel_pfx = re.search(
+            r'(?im)^[ \t]*([A-Z\u0900-\u097F][A-Za-z\u0900-\u097F.]{1,30}(?:[ \t]+[A-Za-z\u0900-\u097F.]+){0,2})[ \t]*,?[ \t]+(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)\b',
+            text
+        )
+        if m_rel_pfx:
+            cand = m_rel_pfx.group(1).strip()
+            if cand and normalize_text(cand) not in DOCTOR_NAMES and normalize_text(cand) not in MEDICAL_TERMS:
+                ev['patient_name'] = cand
+
+    if 'patient_name' not in ev:
+        # Honorific mention fallback (exclude WhatsApp sender bracket lines "[date] Name:")
+        non_wa_lines = "\n".join(line for line in text.splitlines() if not re.match(r'^\[\d{1,2}[/\-]\d{1,2}', line.strip()))
+        m2 = re.search(
+            r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,}[ \t]+(?:sahab|sahib|ji|didi|bhaiya|babu|behenji|behen|amma|साहब|जी|दीदी|भैया|बाबू|बहनजी))\b',
+            non_wa_lines
+        )
         if m2 and normalize_text(m2.group(1)) not in DOCTOR_NAMES:
             ev['patient_name'] = m2.group(1).strip()
 
-    # UHID
-    m = RE_MRN.search(text)
-    if m:
-        ev['uhid'] = m.group(0)
+    # 2. Extract ALL MRNs / UHIDs / IPD IDs
+    for m in RE_MRN.finditer(text_norm):
+        _add_mrn_to_ev(ev, m.group(0))
+    for m in RE_MRN_LABELLED.finditer(text_norm):
+        val = m.group(1).strip()
+        if len(val) >= 4 and not re.match(r'^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$', val):
+            _add_mrn_to_ev(ev, val)
 
-    # Phone
-    m = RE_PHONE.search(text)
-    if m and not is_dose_context(text, m.start(), m.end()):
-        digits = re.sub(r'\D', '', m.group(0))
-        if len(digits) >= 10:
-            ev['phone'] = digits[-10:]
+    # 3. Phone (supports both ASCII and Indic digits via text_norm)
+    for m in RE_PHONE.finditer(text_norm):
+        if not is_dose_context(text_norm, m.start(), m.end()):
+            digits = re.sub(r'\D', '', m.group(0))
+            if len(digits) >= 10:
+                ev['phone'] = digits[-10:]
+                break
 
-    # Aadhaar (12 digits)
-    m = RE_AADHAAR.search(text)
-    if m and not is_dose_context(text, m.start(), m.end()):
-        digits = re.sub(r'\D', '', m.group(0))
-        if len(digits) == 12:
-            ev['aadhaar'] = digits
+    # 4. ABHA FIRST, then Aadhaar excluding ABHA span overlaps (prevents last 12 digits of ABHA masquerading as Aadhaar)
+    abha_spans: list[tuple[int, int]] = []
+    for m in RE_ABHA.finditer(text_norm):
+        abha_spans.append((m.start(), m.end()))
+        ev.setdefault('abha', re.sub(r'[\s\-]', '', m.group(0)))
 
-    # ABHA
-    m = RE_ABHA.search(text)
-    if m:
-        ev['abha'] = re.sub(r'[\s\-]', '', m.group(0))
+    for m in RE_AADHAAR.finditer(text_norm):
+        if any(not (m.end() <= s or m.start() >= e) for s, e in abha_spans):
+            continue
+        if not is_dose_context(text_norm, m.start(), m.end()):
+            digits = re.sub(r'\D', '', m.group(0))
+            if len(digits) == 12:
+                ev.setdefault('aadhaar', digits)
+                break
 
-    # PAN
+    # 5. PAN
     m = RE_PAN.search(text)
     if m:
         ev['pan'] = m.group(0).upper()
 
-    # Relative
-    m = re.search(r'(?i)\b(?:s/o|d/o|w/o|c/o|attendant\s*:?\s*c/o|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?)\s*:?\s*([A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+(?:\s+[A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+)*)', text)
-    if m:
-        ev['relative_name'] = m.group(1).strip()
+    # 6. Relative name (exclude K/C/O, H/C/O, and clinical C/O complaints; horizontal whitespace only)
+    rel_m = re.search(
+        r'(?i)(?:(?<![kKhH]/)(?<!/)\b(?:s/o|d/o|w/o|c/o|attendant[ \t]*(?:\([sSwWdD]/[oO])?)|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?)[ \t]*:?[ \t]*([^\n,;|)]+)',
+        text
+    )
+    if rel_m:
+        cue_start = rel_m.start()
+        if not is_complaint_co(text, cue_start):
+            cand_rel = rel_m.group(1).strip()
+            cand_rel = re.sub(r'^(?:\([sSwWdD]/[oO]\s*|\b[sSwWdD]/[oO]\s+)', '', cand_rel).strip()
+            cand_rel = re.split(r'(?i)[ \t]+(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin|पता|पंजीकरण|गाँव|ग्राम)\b|[ \t]{2,}', cand_rel)[0].strip()
+            rel_low = normalize_text(cand_rel)
+            first_is_proper = bool(cand_rel) and (cand_rel[0].isupper() or _is_deva_letter(cand_rel[0]))
+            if cand_rel and len(cand_rel) >= 2 and first_is_proper and not any(w in rel_low for w in ('fever', 'pain', 'disease', 'typhoid', 'diabetes', 'tuberculosis', 'dengue', 'chronic', 'infection', 'informed', 'complaint', 'burning', 'micturition', 'giddiness', 'headache', 'बुखार', 'दर्द', 'दिन से')):
+                ev['relative_name'] = cand_rel
 
-    # Age
-    m = re.search(r'(?i)(?:age[:/\s]*|उम्र[:/\s]*)(\d{1,3})\s*(?:yrs?|years?|वर्ष)?', text)
-    if m:
-        ev['age'] = m.group(1)
-    # Alt: "52 Yrs/F" or "48/M"
-    m = re.search(r'(\d{1,3})\s*(?:yrs?|years?|वर्ष)\s*/\s*([MF])', text, re.IGNORECASE)
-    if m:
-        ev.setdefault('age', m.group(1))
-        ev['gender'] = m.group(2).upper()
-    m = re.search(r'(\d{1,3})\s*/\s*([MF])\b', text, re.IGNORECASE)
-    if m:
-        ev.setdefault('age', m.group(1))
-        ev.setdefault('gender', m.group(2).upper())
+    # WhatsApp sender can also serve as fallback relative clue
+    wa_m = re.search(r'\[\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4},[^\]]+\][ \t]*([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F \t]{1,35}?):', text)
+    if wa_m and 'relative_name' not in ev:
+        ev['relative_name'] = wa_m.group(1).strip()
 
-    # Gender from relation type
-    if re.search(r'\bw/o\b', text, re.IGNORECASE):
-        ev.setdefault('gender', 'F')
-    elif re.search(r'\bs/o\b', text, re.IGNORECASE):
-        ev.setdefault('gender', 'M')
-    elif re.search(r'\bd/o\b', text, re.IGNORECASE):
-        ev.setdefault('gender', 'F')
+    # 7. Age & Gender
+    m = re.search(r'(?i)\b(?:age|umar|उम्र|आयु)[ \t]*[:=/\-][ \t]*(\d{1,3})', text_norm)
+    if not m:
+        m = re.search(r'(?i)\b(?:age|umar|उम्र|आयु)[ \t]+(\d{1,3})[ \t]*(?:yrs?|yr|years?|वर्ष|/)\b', text_norm)
+    if m:
+        a = _normalize_age(m.group(1))
+        if a is not None:
+            ev['age'] = str(a)
 
-    # Village
-    m = re.search(r'(?i)(?:vill\.?|village|gram|gaon|गाँव|ग्राम)\s*:?\s*([A-Z\u0900-\u097F][\w\s]+?)(?:\s*[,;\n]|\s*(?:tehsil|distt?|dist|तहसील|जिला)|$)', text)
+    m = re.search(r'(?i)(\d{1,3})[ \t]*(?:yrs?|yr|years?|y|वर्ष)?[ \t]*/[ \t]*(M|F|महिला|पुरुष)\b', text_norm)
+    if m:
+        a = _normalize_age(m.group(1))
+        if a is not None:
+            ev.setdefault('age', str(a))
+        g = _normalize_gender(m.group(2))
+        if g:
+            ev['gender'] = g
+
+    if 'gender' not in ev:
+        if re.search(r'\b[wWdD]/[oO]\b', text):
+            ev['gender'] = 'F'
+        elif re.search(r'\b[sS]/[oO]\b', text):
+            ev['gender'] = 'M'
+
+    # 8. DOB
+    m = re.search(r'(?i)\b(?:dob|date\s+of\s+birth|birth\s*date|जन्म\s*तिथि)[ \t]*[:=\-]?[ \t]*(\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4})\b', text_norm)
+    if m:
+        ev['dob'] = m.group(1).strip()
+
+    # 9. Village (avoid Python \w Devanagari matra bug by matching explicit Latin/Devanagari chars)
+    m = re.search(
+        r'(?i)(?:vill\.?|village|gram|gaon|गाँव|ग्राम)[ \t]*:?[ \t]*([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F0-9.\- \t]{1,40}?)(?=[ \t]*(?:[,;\n|]|\b(?:tehsil|distt?|dist)\b|तहसील|जिला|-)|$)',
+        text
+    )
     if m:
         ev['village'] = m.group(1).strip()
+
+    # 10. PIN
+    m = re.search(r'(?i)(?:pin(?:code)?|पिन|\-)[ \t]*:?[ \t]*([1-9]\d{5})\b', text_norm)
+    if m:
+        ev['pin'] = m.group(1)
 
     return ev
 
 
 def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
-    """Extract linkage evidence from a JSON record or FHIR Bundle."""
+    """Extract linkage evidence from a JSON record, nested patient object, or FHIR Bundle."""
     ev: dict[str, Any] = {}
     if not isinstance(data, dict):
         return ev
@@ -1892,7 +2428,7 @@ def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
                 for name_obj in res.get("name", []):
                     given = " ".join(name_obj.get("given", []))
                     family = name_obj.get("family", "")
-                    full = f"{given} {family}".strip()
+                    full = f"{given} {family}".strip() or name_obj.get("text", "").strip()
                     if full:
                         ev.setdefault("patient_name", full)
                 for telecom in res.get("telecom", []):
@@ -1900,73 +2436,169 @@ def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
                     val = telecom.get("value")
                     if val:
                         if sys_val == "phone":
-                            ev.setdefault("phone", re.sub(r'[\s\-+]', '', val))
+                            digits = re.sub(r'\D', '', normalize_text(str(val)))
+                            if len(digits) >= 10:
+                                ev.setdefault("phone", digits[-10:])
                         elif sys_val == "email":
                             ev.setdefault("email", val)
                 for ident in res.get("identifier", []):
                     val = ident.get("value")
                     if val:
-                        ev.setdefault("uhid", val)
+                        s_val = normalize_text(str(val))
+                        digits = re.sub(r'\D', '', s_val)
+                        if RE_ABHA.match(s_val):
+                            ev.setdefault("abha", digits)
+                        elif len(digits) == 12 and digits[0] in '23456789' and '-' not in s_val and 'jjh' not in s_val.lower():
+                            ev.setdefault("aadhaar", digits)
+                        else:
+                            _add_mrn_to_ev(ev, str(val))
                 if res.get("birthDate"):
-                    ev.setdefault("dob", res["birthDate"])
+                    ev.setdefault("dob", str(res["birthDate"]))
                 if res.get("gender"):
-                    ev.setdefault("gender", res["gender"][:1].upper())
+                    g = _normalize_gender(str(res["gender"]))
+                    if g:
+                        ev.setdefault("gender", g)
                 for addr in res.get("address", []):
-                    if addr.get("city"):
-                        ev.setdefault("village", addr["city"])
-                    if addr.get("postalCode"):
-                        ev.setdefault("pin", addr["postalCode"])
+                    if isinstance(addr, dict):
+                        if addr.get("city"):
+                            ev.setdefault("village", addr["city"])
+                        if addr.get("postalCode"):
+                            ev.setdefault("pin", str(addr["postalCode"]))
+                for ext in res.get("extension", []):
+                    if isinstance(ext, dict):
+                        url_v = str(ext.get("url", "")).lower()
+                        val_s = ext.get("valueString")
+                        if val_s and any(w in url_v for w in ("mother", "father", "guardian", "relative")):
+                            ev.setdefault("relative_name", str(val_s).strip())
         return ev
 
-    if isinstance(data, dict):
-        for k, v in data.items():
-            kl = normalize_text(k)
-            if isinstance(v, str) and v.strip():
-                h_type = classify_header(k)
-                if h_type == 'PATIENT_NAME' or 'patient' in kl and 'name' in kl:
-                    ev['patient_name'] = v.strip()
-                elif h_type == 'RELATIVE_NAME' or 'relative' in kl:
-                    ev['relative_name'] = v.strip()
-                elif h_type == 'PHONE' or 'phone' in kl or 'mobile' in kl:
-                    ev['phone'] = re.sub(r'[\s\-+]', '', v)
-                elif h_type == 'AADHAAR' or 'aadhaar' in kl or 'aadhar' in kl:
-                    digits = re.sub(r'\D', '', v)
-                    if len(digits) >= 8:
-                        ev['aadhaar'] = digits
-                elif h_type == 'ABHA_NUMBER' or 'abha' in kl:
-                    ev['abha'] = v.strip()
-                elif h_type == 'MRN' or 'uhid' in kl or 'mrn' in kl or 'patient_id' in kl or 'patient_ref' in kl:
-                    ev['uhid'] = v.strip()
-                elif h_type == 'EMAIL' or 'email' in kl:
-                    ev['email'] = v.strip()
-                elif h_type == 'PAN' or 'pan' in kl:
-                    ev['pan'] = v.strip()
-                elif h_type == 'VILLAGE' or 'village' in kl or 'gaon' in kl:
-                    ev['village'] = v.strip()
-                elif h_type == 'DOB' or 'dob' in kl or 'birth' in kl:
-                    ev['dob'] = v.strip()
-                elif 'name' in kl and 'doctor' not in kl and 'hospital' not in kl:
-                    ev.setdefault('patient_name', v.strip())
-            elif isinstance(v, (int, float)) and ('age' in kl or 'umar' in kl):
-                ev['age'] = str(int(v))
-            elif isinstance(v, (int, float)) and ('aadhaar' in kl or 'aadhar' in kl):
-                ev['aadhaar'] = str(int(v))
-            elif isinstance(v, (int, float)) and ('phone' in kl or 'mobile' in kl):
-                ev['phone'] = str(int(v))
-            elif isinstance(v, str) and ('age' in kl or 'umar' in kl):
-                m = re.search(r'\d+', v)
-                if m:
-                    ev['age'] = m.group(0)
-            if isinstance(v, str) and ('gender' in kl or 'sex' in kl or 'ling' in kl):
-                ev['gender'] = v.strip().upper()[:1]
+    # Recurse cleanly on nested dict objects (e.g. dhh_patients.json, lab/report_*.json)
+    first_part = ''
+    last_part = ''
+    local_part = ''
+    for k, v in data.items():
+        kl = normalize_text(k)
+        kl_clean = re.sub(r'[_\-./]', ' ', kl).strip()
 
-        # Also look for free-text notes
-        for k, v in data.items():
-            if isinstance(v, str) and len(v) > 50 and ('note' in k.lower() or 'complaint' in k.lower()
-                                                        or 'history' in k.lower()):
-                text_ev = extract_evidence_text(v)
-                for ek, ev_val in text_ev.items():
+        if isinstance(v, dict):
+            sub_url = str(v.get('url', '')).lower()
+            if kl_clean in ('name', 'patient name', 'patientname'):
+                fn = str(v.get('first') or v.get('given') or '').strip()
+                ln = str(v.get('last') or v.get('family') or '').strip()
+                loc_n = str(v.get('local') or '').strip()
+                full = f"{fn} {ln}".strip()
+                if full:
+                    ev.setdefault('patient_name', full)
+                if loc_n:
+                    if 'patient_name' not in ev:
+                        ev['patient_name'] = loc_n
+                    elif normalize_text(loc_n) != normalize_text(ev['patient_name']):
+                        ev.setdefault('patient_name_alt', loc_n)
+            elif kl_clean in ('guardian', 'relative', 'attendant', 'contact person') or any(w in sub_url for w in ('mother', 'father', 'guardian')):
+                rel_n = v.get('name') or v.get('valueString') or v.get('value')
+                if isinstance(rel_n, str) and rel_n.strip():
+                    ev.setdefault('relative_name', rel_n.strip())
+            else:
+                sub_ev = extract_evidence_json(v)
+                for ek, eval_v in sub_ev.items():
+                    if ek == 'mrns':
+                        for m_item in eval_v:
+                            _add_mrn_to_ev(ev, m_item)
+                    else:
+                        ev.setdefault(ek, eval_v)
+            continue
+
+        h_type = classify_header(k)
+        if isinstance(v, str) and v.strip():
+            vs = v.strip()
+            if h_type == 'PATIENT_NAME' or ('patient' in kl and 'name' in kl):
+                if kl_clean in ('first', 'first name', 'firstname', 'given'):
+                    first_part = vs
+                elif kl_clean in ('last', 'last name', 'lastname', 'family', 'surname'):
+                    last_part = vs
+                elif kl_clean in ('local', 'local name'):
+                    local_part = vs
+                else:
+                    ev.setdefault('patient_name', vs)
+            elif h_type == 'RELATIVE_NAME' or 'relative' in kl:
+                ev.setdefault('relative_name', vs)
+            elif h_type == 'PHONE' or 'phone' in kl or 'mobile' in kl:
+                digits = re.sub(r'\D', '', normalize_text(vs))
+                if len(digits) >= 10:
+                    ev.setdefault('phone', digits[-10:])
+            elif h_type == 'AADHAAR' or 'aadhaar' in kl or 'aadhar' in kl:
+                digits = re.sub(r'\D', '', normalize_text(vs))
+                if len(digits) == 12:
+                    ev.setdefault('aadhaar', digits)
+            elif h_type == 'ABHA_NUMBER' or 'abha' in kl:
+                ev.setdefault('abha', normalize_text(vs))
+            elif h_type == 'MRN' or any(t in kl for t in ('uhid', 'mrn', 'patient_id', 'patient_ref', 'ipd')):
+                _add_mrn_to_ev(ev, vs)
+            elif h_type == 'EMAIL' or 'email' in kl:
+                ev.setdefault('email', vs)
+            elif h_type == 'PAN' or kl_clean == 'pan' or 'pan no' in kl_clean:
+                ev.setdefault('pan', vs)
+            elif h_type == 'INSURANCE_ID':
+                ev.setdefault('insurance', vs)
+            elif h_type == 'VILLAGE' or any(t in kl_clean for t in ('village', 'gaon', 'city', 'gram')):
+                ev.setdefault('village', vs)
+            elif h_type == 'PIN' or kl_clean in ('pin', 'pincode', 'postal code', 'zip'):
+                pin_d = re.sub(r'\D', '', normalize_text(vs))
+                if len(pin_d) == 6:
+                    ev.setdefault('pin', pin_d)
+            elif h_type == 'DOB' or 'dob' in kl or 'birth' in kl:
+                ev.setdefault('dob', normalize_text(vs))
+            elif kl_clean == 'age sex' or kl_clean == 'sex':
+                g = _normalize_gender(vs)
+                if g:
+                    ev.setdefault('gender', g)
+            elif 'name' in kl and not any(bad in kl for bad in ('doctor', 'hospital', 'lab', 'test', 'drug', 'panel')):
+                ev.setdefault('patient_name', vs)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            if any(t in kl for t in ('age', 'umar')):
+                a = _normalize_age(v)
+                if a is not None:
+                    ev.setdefault('age', str(a))
+            elif 'aadhaar' in kl or 'aadhar' in kl:
+                d = str(int(v))
+                if len(d) == 12:
+                    ev.setdefault('aadhaar', d)
+            elif 'phone' in kl or 'mobile' in kl:
+                d = str(int(v))
+                if len(d) >= 10:
+                    ev.setdefault('phone', d[-10:])
+            elif kl_clean in ('pin', 'pincode', 'postal code', 'zip'):
+                d = str(int(v))
+                if len(d) == 6:
+                    ev.setdefault('pin', d)
+        if isinstance(v, str) and v.strip():
+            if any(t in kl_clean.split() for t in ('age', 'umar')):
+                a = _normalize_age(v)
+                if a is not None:
+                    ev.setdefault('age', str(a))
+            if any(t in kl_clean.split() for t in ('gender', 'sex', 'ling')):
+                g = _normalize_gender(v)
+                if g:
+                    ev.setdefault('gender', g)
+
+        # Free-text notes/remarks fallback
+        if isinstance(v, str) and len(v) > 25 and any(t in kl for t in ('note', 'complaint', 'history', 'remark')):
+            text_ev = extract_evidence_text(v)
+            for ek, ev_val in text_ev.items():
+                if ek == 'mrns':
+                    for m_item in ev_val:
+                        _add_mrn_to_ev(ev, m_item)
+                else:
                     ev.setdefault(ek, ev_val)
+
+    if first_part or last_part:
+        ev.setdefault('patient_name', f"{first_part} {last_part}".strip())
+    if local_part:
+        if 'patient_name' not in ev:
+            ev['patient_name'] = local_part
+        elif normalize_text(local_part) != normalize_text(ev['patient_name']):
+            ev.setdefault('patient_name_alt', local_part)
+
     return ev
 
 
@@ -2318,10 +2950,22 @@ def process_json(text: str, rel: str, records: list,
 
     # Determine if this is a FHIR Bundle, a single document, or a record collection
     is_fhir = isinstance(data, dict) and data.get("resourceType") == "Bundle"
-    is_doc = not isinstance(data, dict) or is_fhir or not any(
-        isinstance(v, list) and v and all(isinstance(x, dict) for x in v)
-        for v in data.values()
+    has_single_subject = isinstance(data, dict) and any(
+        isinstance(data.get(k), dict) for k in ("patient", "subject", "demographics")
     )
+    has_record_array = isinstance(data, dict) and any(
+        isinstance(v, list) and v and all(isinstance(x, dict) for x in v)
+        and (
+            k.lower() in ("patients", "visits", "records", "results", "entries", "rows", "cases")
+            or any(
+                ik in x
+                for x in v[:3]
+                for ik in ("patient_ref", "uhid", "patient_id", "visit_id", "patient_name")
+            )
+        )
+        for k, v in data.items()
+    )
+    is_doc = not isinstance(data, dict) or is_fhir or has_single_subject or not has_record_array
 
     doc_shift = None
     if is_doc:
