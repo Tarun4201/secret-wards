@@ -1,0 +1,7 @@
+# Privacy policy configuration
+age_band_years: 5
+date_shift_max_days: 180
+min_group_size: 5
+link_strong_threshold: 0.8
+link_margin: 0.2
+

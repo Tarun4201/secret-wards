@@ -1,0 +1,6 @@
+regex>=2024.0.0
+rapidfuzz>=3.0
+jellyfish>=1.0
+phonenumbers>=8.13
+indic-transliteration>=2.3
+
