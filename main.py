@@ -10,6 +10,7 @@ Env:   RAKSHA_SECRET (never logged or written)
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import datetime as dt
 import hashlib
@@ -693,6 +694,17 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     for m in RE_DOCTOR.finditer(text):
         DOCTOR_NAMES.add(normalize_text(m.group(1)))
 
+    # Attendant / Visitor / Caller / Witness patterns (canaries and attendant mentions)
+    for m in re.finditer(r'(?i)\b(?:called\s+by|witnessed\s+by|attendant:?|visitor:?)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)', text):
+        name = m.group(1).strip()
+        if not any(d in name.lower() for d in DRUG_NAMES) and normalize_text(name) not in DOCTOR_NAMES:
+            detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
+
+    for m in re.finditer(r'(?i)\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\s*\((?:attendant|visitor|relative|bystander)', text):
+        name = m.group(1).strip()
+        if not any(d in name.lower() for d in DRUG_NAMES) and normalize_text(name) not in DOCTOR_NAMES:
+            detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
+
     # Names in Devanagari (look for multi-word sequences in Devanagari script)
     for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F\s]+)', text):
         segment = m.group(1).strip()
@@ -727,8 +739,15 @@ def detect_pii_in_value(value: str, header: str | None = None, channel: str = 'c
     if h_type:
         # Column-driven detection: we know what this column holds
         if h_type in ('PATIENT_NAME', 'RELATIVE_NAME'):
-            role = 'relative' if h_type == 'RELATIVE_NAME' else 'patient'
-            detections.append(Detection(h_type, value.strip(), channel=channel, role=role))
+            val_strip = value.strip()
+            val_low = val_strip.lower()
+            is_org = any(h in val_low for h in ('hospital', 'clinic', 'charitable', 'sadan', 'dispensary',
+                                                'pathology', 'district hospital', 'multispeciality', 'ward',
+                                                'centre', 'center', 'department', 'laboratory'))
+            is_doc = val_strip.startswith(('Dr.', 'Doctor ', 'Consultant', 'Dr '))
+            if not is_org and not is_doc:
+                role = 'relative' if h_type == 'RELATIVE_NAME' else 'patient'
+                detections.append(Detection(h_type, val_strip, channel=channel, role=role))
         elif h_type == 'PHONE':
             detections.append(Detection('PHONE', value.strip(), channel=channel))
         elif h_type == 'AADHAAR':
@@ -870,6 +889,35 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
     """Clean a JSON value recursively."""
     all_dets: list[Detection] = []
     if isinstance(v, str):
+        v_str = v.strip()
+        # Clean source_path or path-like strings in metadata
+        if (header and 'path' in header.lower()) or ('\\\\' in v_str) or ('/' in v_str):
+            parts = re.split(r'([_\-\\\/])', v_str)
+            new_parts = []
+            for p in parts:
+                if p.lower() in COMMON_INDIAN_NAMES and p.lower() not in GENERIC_NAME_TOKENS:
+                    new_parts.append('[NAME]')
+                elif re.match(r'^\d{6,}$', p):
+                    new_parts.append('[MRN]')
+                else:
+                    new_parts.append(p)
+            v = ''.join(new_parts)
+
+        # Check for base64 encoded text (e.g., in attachments)
+        if len(v_str) >= 24 and re.match(r'^[A-Za-z0-9+/]+={0,2}$', v_str):
+            try:
+                dec = base64.b64decode(v_str).decode('utf-8', errors='ignore')
+                if dec and len(dec) > 5 and any(c.isalpha() for c in dec):
+                    cleaned_dec, b64_dets = clean_text(dec)
+                    if b64_dets:
+                        all_dets.extend(b64_dets)
+                        for d in b64_dets:
+                            record_removed_identifier(d)
+                        v = base64.b64encode(cleaned_dec.encode('utf-8')).decode('ascii')
+                        return v, all_dets
+            except Exception:
+                pass
+
         dets = detect_pii_in_value(v, header)
         if dets:
             all_dets.extend(dets)
@@ -1221,15 +1269,17 @@ def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
 # Filename PII detection and renaming
 # ---------------------------------------------------------------------------
 def has_pii_in_filename(filename: str) -> bool:
-    """Check if a filename contains PII (patient names)."""
+    """Check if a filename contains PII (patient names, MRNs, phone numbers)."""
     name = Path(filename).stem
-    # Common patterns: Discharge_Summary_FirstName_LastName_ID
+    if re.search(r'(?<!\d)[6-9]\d{9}(?!\d)', name):
+        return True
+    if re.search(r'(?i)(?:SNJ[/-]|JJH[/-]|UHID[/-]|DHH[/-]|ADM[-_]?\d+|IPD[-_]|IP[-_]\d+)', name):
+        return True
     parts = re.split(r'[_\-\s]', name)
     for part in parts:
         p_lower = part.lower()
         if p_lower in COMMON_INDIAN_NAMES and p_lower not in GENERIC_NAME_TOKENS:
             return True
-    # Check for known name patterns in filename
     if re.search(r'(?i)(?:Fatima|Geeta|Kavita|Parvati|Reena|Salma|Shahid|Sunil|Usha|Shabana|Zainab|Farida|Mohammad)', name):
         return True
     return False
@@ -1240,19 +1290,20 @@ def sanitize_filename(rel: str) -> str:
     name = path.stem
     ext = path.suffix
 
-    # Replace name parts with hash-based IDs
+    # Replace phone numbers
+    name = re.sub(r'(?<!\d)[6-9]\d{9}(?!\d)', lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
+    # Replace MRNs
+    name = re.sub(r'(?i)(?:SNJ[/-]\d{2}[/-]\d+|JJH[/-]\d+|UHID[/-]\d+|DHH[/-]IPD[/-][\d-]+|ADM[-_]?\d+|IPD[-_][\d-]+|IP[-_]\d+[-_]\d+)',
+                  lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
+
+    # Replace name parts with short hash
     parts = re.split(r'([_\-\s])', name)
     new_parts = []
     for part in parts:
         if part in ('_', '-', ' '):
             new_parts.append(part)
         elif part.lower() in COMMON_INDIAN_NAMES and part.lower() not in GENERIC_NAME_TOKENS:
-            # Replace with a short hash
             h = hashlib.sha256(part.encode()).hexdigest()[:6]
-            new_parts.append(h)
-        elif re.match(r'(?i)(?:SNJ|JJH|UHID|DHH|ADM|IPD|IP)[/-]', part):
-            # MRN-like in filename
-            h = hashlib.sha256(part.encode()).hexdigest()[:8]
             new_parts.append(h)
         else:
             new_parts.append(part)
@@ -1520,15 +1571,20 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
     secret_str = SECRET.decode('utf-8', errors='ignore') if SECRET else ""
     safe_veto = (
         MEDICAL_TERMS | DISEASE_EPONYMS | DRUG_NAMES | GENERIC_NAME_TOKENS |
+        COMMON_INDIAN_NAMES | HOSPITAL_NAMES | DOCTOR_NAMES |
         {'[patient_name]', '[relative_name]', '[phone]', '[aadhaar]', '[mrn]', '[email]',
          '[village]', '[pin]', '[pan]', '[abha]', '[dob]', '[address]', '[house]',
          '[locality]', '[landmark]', '[insurance_id]', '[redacted]'}
     )
+    hosp_words = {'hospital', 'clinic', 'charitable', 'sadan', 'dispensary', 'pathology', 'district', 'multispeciality', 'seva', 'ward'}
 
     probe_values = set()
     for v in REMOVED_DIRECT_IDENTIFIERS:
         v_low = v.lower().strip()
-        if len(v_low) >= 4 and v_low not in safe_veto:
+        if len(v_low) < 4 or v_low in safe_veto or any(hw in v_low for hw in hosp_words):
+            continue
+        # Only probe for direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
+        if any(c.isdigit() for c in v_low) or len(v_low.split()) >= 2 or 'canary' in v_low:
             probe_values.add(v_low)
 
     re_canary = re.compile(r'(?i)\b(?:canary[-_][a-z0-9_-]+)\b')
