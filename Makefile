@@ -1,4 +1,4 @@
-.PHONY: check test bench clean
+.PHONY: check test bench ablation clean
 
 check:
 	ruff check .
@@ -9,6 +9,9 @@ test:
 
 bench:
 	python tools/benchmark/benchmark.py
+
+ablation:
+	python tools/benchmark/ablation.py
 
 clean:
 	rm -rf out_* /tmp/test_out build dist *.egg-info .pytest_cache .ruff_cache

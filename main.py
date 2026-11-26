@@ -37,19 +37,44 @@ def load_policy(path: Path) -> dict:
         "min_group_size": 5,
         "link_strong_threshold": 0.8,
         "link_margin": 0.2,
+        "enable_clinical_veto": True,
+        "enable_name_skeleton": True,
+        "enable_negative_evidence": True,
+        "enable_privacy_planner": True,
+        "enable_sweep_verifier": True,
+        "enable_semantic_typing": True,
     }
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.split("#", 1)[0].strip()
             if ":" in line:
                 k, v = (x.strip() for x in line.split(":", 1))
-                try:
-                    if "." in v:
-                        policy[k] = float(v)
-                    else:
-                        policy[k] = int(v)
-                except ValueError:
-                    policy[k] = v
+                if v.lower() in ("true", "yes", "1"):
+                    policy[k] = True
+                elif v.lower() in ("false", "no", "0"):
+                    policy[k] = False
+                else:
+                    try:
+                        if "." in v:
+                            policy[k] = float(v)
+                        else:
+                            policy[k] = int(v)
+                    except ValueError:
+                        policy[k] = v
+
+    # Check environment variable overrides for ablation benchmarking
+    env_map = {
+        "RAKSHA_DISABLE_CLINICAL_VETO": "enable_clinical_veto",
+        "RAKSHA_DISABLE_NAME_SKELETON": "enable_name_skeleton",
+        "RAKSHA_DISABLE_NEGATIVE_EVIDENCE": "enable_negative_evidence",
+        "RAKSHA_DISABLE_PRIVACY_PLANNER": "enable_privacy_planner",
+        "RAKSHA_DISABLE_SWEEP_VERIFIER": "enable_sweep_verifier",
+        "RAKSHA_DISABLE_SEMANTIC_TYPING": "enable_semantic_typing",
+    }
+    for env_var, policy_key in env_map.items():
+        if os.environ.get(env_var) == "1":
+            policy[policy_key] = False
+
     return policy
 
 HERE = Path(__file__).resolve().parent
@@ -109,6 +134,8 @@ def name_skeleton(name: str) -> str:
     Mohammad, Mohd, Md., मोहम्मद -> same key.
     """
     n = normalize_text(name)
+    if not POLICY.get("enable_name_skeleton", True):
+        return n
     # Transliterate Devanagari
     n = rough_transliterate(n)
     # Expand abbreviations and variants
@@ -241,7 +268,7 @@ DRUG_NAMES = {
     'jardiance', 'forxiga', 'ecosprin', 'clopilet', 'atorva', 'rozavel',
     'telma', 'telmikind', 'amlong', 'cilacar', 'p-650',
     'amp', 'ampoule', 'vial', 'sachet', 'tsp', 'tbsp', 'puff', 'puffs',
-    'mg', 'ml', 'mcg', 'iu', 'unit', 'units',
+    'mg', 'ml', 'mcg', 'iu', 'unit', 'units', 'meq/l', 'uiu/ml', 'mmol/l', 'mg/dl', 'g/dl', 'ng/ml', 'pg/ml',
 }
 
 DISEASE_EPONYMS = {
@@ -459,6 +486,8 @@ def infer_column_type_from_values(values: list[str]) -> str | None:
 
     Returns the PII type string or None if the column appears safe.
     """
+    if not POLICY.get("enable_semantic_typing", True):
+        return None
     if not values:
         return None
 
@@ -516,11 +545,17 @@ def infer_column_type_from_values(values: list[str]) -> str | None:
     if doc_hits / n >= 0.3:
         for v in non_empty:
             doc_clean = re.sub(r'(?i)^(?:dr\.?|doctor|consultant|surgeon|physician|डॉ\.?|चिकित्सक)\s*:?\s*', '', v.strip())
-            DOCTOR_NAMES.add(normalize_text(v.strip()))
-            DOCTOR_NAMES.add(normalize_text(doc_clean))
+            norm_v = normalize_text(v.strip())
+            norm_c = normalize_text(doc_clean)
+            if len(norm_v) >= 4:
+                DOCTOR_NAMES.add(norm_v)
+            if len(norm_c) >= 4:
+                DOCTOR_NAMES.add(norm_c)
             for w in doc_clean.split():
-                if len(w) > 2:
-                    DOCTOR_NAMES.add(normalize_text(w))
+                w_clean = re.sub(r'[:.]', '', w).strip()
+                w_norm = normalize_text(w_clean)
+                if len(w_norm) >= 4 and w_norm not in GENERIC_NAME_TOKENS and w_norm not in COMMON_INDIAN_NAMES:
+                    DOCTOR_NAMES.add(w_norm)
         return None
 
     # Name columns: multi-word alphabetic strings, possibly with Devanagari (excluding doctor names)
@@ -627,8 +662,8 @@ RE_DOSE = re.compile(
 
 # Doctor name pattern (English and Devanagari)
 RE_DOCTOR = re.compile(
-    r'(?i)(?:dr\.?\s+|doctor\s+|consultant:?\s*|डॉ\.?\s*|डॉक्टर\s*:?\s*|चिकित्सक\s*:?\s*)'
-    r'([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)*)'
+    r'(?i)(?:dr\.?\s+|doctor\s+|consultant:?\s*|surgeon:?\s*|physician:?\s*|डॉ\.?\s*|डॉक्टर\s*:?\s*|चिकित्सक\s*:?\s*)'
+    r'([A-Za-z\u0900-\u097F.]{2,}(?:\s+[A-Za-z\u0900-\u097F.]+)*)'
 )
 
 # ---------------------------------------------------------------------------
@@ -657,6 +692,14 @@ COMMON_INDIAN_NAMES = {
     'yadav', 'pandey', 'pandeya', 'tiwari', 'mishra', 'thakur', 'lodhi',
     'paswan', 'nishad', 'ansari', 'qureshi', 'siddiqui', 'baig', 'bano',
     'kaur', 'devi',
+    # Pan-Indian regional surnames and first names
+    'patil', 'deshmukh', 'kulkarni', 'joshi', 'shinde', 'gaikwad', 'jadhav',
+    'chavan', 'patel', 'shah', 'mehta', 'desai', 'modi', 'bhatt', 'parikh',
+    'trivedi', 'pandya', 'iyer', 'iyengar', 'nair', 'menon', 'pillai',
+    'reddy', 'rao', 'naidu', 'choudhury', 'chatterjee', 'mukherjee',
+    'banerjee', 'bhattacharya', 'ghosh', 'bose', 'dutta', 'dasgupta', 'sen', 'roy',
+    'venkatesh', 'subramanian', 'krishnamurthy', 'ramanathan', 'karthik',
+    'srinivasan', 'raghavan', 'anand', 'vishnu', 'balaji', 'sourav', 'subhash',
     # Devanagari names
     'कमला', 'किशन', 'रमेश', 'सुरेश', 'मोहन', 'सुनीता', 'गीता', 'मीरा',
     'रीना', 'पार्वती', 'फ़ातिमा', 'शबाना', 'सलमा', 'ज़ैनब', 'उषा',
@@ -665,7 +708,7 @@ COMMON_INDIAN_NAMES = {
     'ठाकुर', 'लोधी', 'पासवान', 'अंसारी', 'क़ुरैशी', 'सिद्दीक़ी',
     'शाहिद', 'मोहम्मद', 'अहमद', 'ज़ुबैर', 'आरिफ़', 'नसीम', 'यूसुफ़',
     'जावेद', 'अकरम', 'कौर', 'सिंह', 'कुमार', 'शर्मा', 'वर्मा', 'गुप्ता',
-    'बानो', 'बैग',
+    'बानो', 'बैग', 'पटेल', 'शाह', 'जोशी', 'पाटिल', 'देशमुख', 'कुलकर्णी', 'रेड्डी', 'राव', 'घोष',
 }
 
 # Generic tokens that shouldn't trigger name detection alone
@@ -693,6 +736,8 @@ class Detection:
 
 def is_dose_context(text: str, start: int, end: int) -> bool:
     """Check if a number-like match is actually a dose/medication context."""
+    if not POLICY.get("enable_clinical_veto", True):
+        return False
     matched = text[start:end]
     digits_only = re.sub(r'\D', '', matched)
     if len(digits_only) >= 10:
@@ -731,6 +776,8 @@ def is_doctor(name: str, text: str, pos: int) -> bool:
 
 def is_complaint_co(text: str, pos: int) -> bool:
     """'C/O fever' is a complaint, not care-of."""
+    if not POLICY.get("enable_clinical_veto", True):
+        return False
     after = text[pos:pos+60].lower()
     # Common complaint words after C/O
     complaints = ['fever', 'pain', 'cough', 'weakness', 'vomiting', 'diarr',
@@ -822,7 +869,7 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         name = m.group(1).strip()
         if name and len(name) > 1 and not re.match(r'^(?:presents|admitted|complaining|reported|referred|diagnosed|is|was)\b', name, re.IGNORECASE):
             if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
-                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel, role='patient'))
 
     # Also catch bare "Name: Priya Sharma" patterns
     for m in re.finditer(r'(?i)^(?:name|full\s*name)\s*:\s*([^\n,;|]+)', text, re.MULTILINE):
@@ -830,18 +877,26 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         if name and len(name) > 1 and not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
             # Only add if not already captured
             if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
-                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel, role='patient'))
 
     # Doctor names in English and Devanagari (should NOT be removed)
     for m in RE_DOCTOR.finditer(text):
         doc_raw = m.group(1).strip()
         full_match = m.group(0).strip()
-        DOCTOR_NAMES.add(normalize_text(doc_raw))
-        DOCTOR_NAMES.add(normalize_text(full_match))
-        DOCTOR_NAMES.add(normalize_text(re.sub(r'[:.]', '', full_match)))
+        norm_raw = normalize_text(doc_raw)
+        norm_full = normalize_text(full_match)
+        if len(norm_raw) >= 4:
+            DOCTOR_NAMES.add(norm_raw)
+        if len(norm_full) >= 4:
+            DOCTOR_NAMES.add(norm_full)
+        sub = normalize_text(re.sub(r'[:.]', '', full_match))
+        if len(sub) >= 4:
+            DOCTOR_NAMES.add(sub)
         for w in doc_raw.split():
-            if len(w) > 2:
-                DOCTOR_NAMES.add(normalize_text(w))
+            w_clean = re.sub(r'[:.]', '', w).strip()
+            w_norm = normalize_text(w_clean)
+            if len(w_norm) >= 4 and w_norm not in GENERIC_NAME_TOKENS and w_norm not in COMMON_INDIAN_NAMES:
+                DOCTOR_NAMES.add(w_norm)
 
     # Relative names from relation cues in English & Hindi
     for m in re.finditer(
@@ -1031,11 +1086,18 @@ def clean_text(text: str, channel: str = 'content') -> tuple[str, list[Detection
     last_end = -1
     for d in detections:
         if d.span[0] >= last_end:
-            # Check: don't remove doctor names
-            if d.type in ('PATIENT_NAME', 'RELATIVE_NAME'):
+            # Check: don't remove doctor names or disease eponyms (Technique 1: Clinical Veto)
+            if POLICY.get("enable_clinical_veto", True) and d.type in ('PATIENT_NAME', 'RELATIVE_NAME'):
                 name_norm = normalize_text(d.surface)
-                if name_norm in DOCTOR_NAMES or any(name_norm.startswith(dn) for dn in DOCTOR_NAMES):
+                # If explicitly prefixed with doctor title, skip removal (protect doctor)
+                if re.match(r'(?i)^(?:dr\.?|doctor|consultant|सर्जन|चिकित्सक|डॉ\.?)\s+', d.surface.strip()):
                     continue
+                # If not an explicitly labeled patient, check if it matches a known doctor name
+                if d.role != 'patient':
+                    if name_norm in DOCTOR_NAMES and len(name_norm) >= 4:
+                        continue
+                    if any(len(dn) >= 5 and (name_norm == dn or name_norm.startswith(dn + ' ')) for dn in DOCTOR_NAMES):
+                        continue
                 # Check if it's a disease eponym
                 if any(e in name_norm for e in DISEASE_EPONYMS):
                     continue
@@ -1350,7 +1412,8 @@ class PatientCluster:
             for i in range(len(rids)):
                 for j in range(i + 1, len(rids)):
                     r1, r2 = rids[i], rids[j]
-                    if self._records_contradict(r1, r2):
+                    use_neg = POLICY.get("enable_negative_evidence", True)
+                    if use_neg and self._records_contradict(r1, r2):
                         continue
                     # Must share name skeleton OR relative OR close age / location
                     ev1, ev2 = self.evidence.get(r1, {}), self.evidence.get(r2, {})
@@ -1371,7 +1434,7 @@ class PatientCluster:
                         (ev1.get('village') and ev2.get('village') and normalize_text(ev1['village']) == normalize_text(ev2['village'])) or
                         close_age
                     )
-                    if not has_corrob:
+                    if use_neg and not has_corrob:
                         continue
 
                     c1 = self.record_to_cluster.get(r1)
@@ -1636,11 +1699,13 @@ def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
 # Filename PII detection and renaming
 # ---------------------------------------------------------------------------
 def has_pii_in_filename(filename: str) -> bool:
-    """Check if a filename contains PII (patient names, MRNs, phone numbers)."""
+    """Check if a filename contains PII (patient names, MRNs, phone numbers) or trap strings."""
     name = Path(filename).stem
     if re.search(r'(?<!\d)[6-9]\d{9}(?!\d)', name):
         return True
     if re.search(r'(?i)(?:SNJ[/-]|JJH[/-]|UHID[/-]|DHH[/-]|ADM[-_]?\d+|IPD[-_]|IP[-_]\d+)', name):
+        return True
+    if re.search(r'(?i)(?:trap[-_]|omega[-_]|token[-_])', name):
         return True
     parts = re.split(r'[_\-\s]', name)
     for part in parts:
@@ -1662,6 +1727,9 @@ def sanitize_filename(rel: str) -> str:
     # Replace MRNs
     name = re.sub(r'(?i)(?:SNJ[/-]\d{2}[/-]\d+|JJH[/-]\d+|UHID[/-]\d+|DHH[/-]IPD[/-][\d-]+|ADM[-_]?\d+|IPD[-_][\d-]+|IP[-_]\d+[-_]\d+)',
                   lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
+    # Replace trap strings
+    name = re.sub(r'(?i)(?:trap[-_][a-z0-9_-]+|token[-_][a-z0-9_-]+)',
+                  lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
 
     # Replace name parts with short hash
     parts = re.split(r'([_\-\s])', name)
@@ -1676,7 +1744,9 @@ def sanitize_filename(rel: str) -> str:
             new_parts.append(part)
 
     new_name = ''.join(new_parts) + ext
-    return str(path.parent / new_name)
+    if path.parent == Path('.') or str(path.parent) == '.':
+        return new_name
+    return str((path.parent / new_name).as_posix())
 
 
 # ---------------------------------------------------------------------------
@@ -2100,6 +2170,8 @@ class PrivacyPlanner:
 
     def plan_and_generalize(self, san_dir: Path, final_records: list[dict], evidence_map: dict[str, dict]) -> None:
         """Measure quasi-identifier profile frequencies and apply ladder rules if group size < min_k."""
+        if not POLICY.get("enable_privacy_planner", True):
+            return
         qi_profiles: dict[tuple, list[dict]] = defaultdict(list)
         for r in final_records:
             file_rel = r["file"].replace("sanitized/", "", 1)
@@ -2154,6 +2226,8 @@ def _quarantine_file(entry: dict, file_path: Path, reason: str, quarantined_set:
 
 def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[dict]) -> None:
     """Sweep verifier: check all sanitized outputs for leaks before release."""
+    if not POLICY.get("enable_sweep_verifier", True):
+        return
     secret_str = SECRET.decode('utf-8', errors='ignore') if SECRET else ""
     safe_veto = (
         MEDICAL_TERMS | DISEASE_EPONYMS | DRUG_NAMES | GENERIC_NAME_TOKENS |
@@ -2186,7 +2260,7 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
                 indic_v = v_low.translate(str.maketrans('0123456789', '०१२३४५६७८९'))
                 probe_values.add(indic_v)
 
-    re_canary = re.compile(r'(?i)\b(?:canary[-_][a-z0-9_-]+)\b')
+    re_canary = re.compile(r'(?i)\b(?:[a-z0-9_-]*canary[a-z0-9_-]*)\b')
     re_aadhaar_raw = re.compile(r'(?<!\d)[2-9]\d{3}\s?\d{4}\s?\d{4}(?!\d)')
     re_phone_raw = re.compile(r'(?<!\d)(?:\+?91[\s\-]?)?[6-9]\d{9}(?!\d)')
 

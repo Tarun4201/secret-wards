@@ -66,11 +66,14 @@ pip install -r requirements.txt
 # Run firewall
 RAKSHA_SECRET="your-secret-key" python main.py --input /path/to/input --output /path/to/output
 
-# Run unit tests (63 tests across Tier 1, Tier 2, and Tier 3)
+# Run unit & integration tests (70 tests across Tiers 1-4, including 22-file challenge set)
 make test
 
 # Run RAKSHA privacy vs utility benchmark
 make bench
+
+# Run systematic ablation study (PRD v4 Section 5.1)
+python tools/benchmark/ablation.py
 ```
 
 ---
