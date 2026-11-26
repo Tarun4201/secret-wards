@@ -1,0 +1,6 @@
+﻿{
+  "records": [
+    {"patient_name": "Mohammad Ahmed", "uhid": "UHID-456", "age": 60, "phone": "7654321098", "diagnosis": "COPD", "medicine": "Salbutamol inhaler BD", "note": "Patient S/o Abdul Rahman, C/O breathlessness. Dr. Sharma reviewed."},
+    {"patient_name": "Fatima Begum", "uhid": "UHID-789", "age": 28, "phone": "6543210987", "aadhaar": "456789012345", "diagnosis": "Anaemia", "medicine": "Ferrous sulphate 200mg OD"}
+  ]
+}

@@ -1,0 +1,4 @@
+﻿uhid,name,age,gender,phone,aadhaar,village,diagnosis,medicine,admission_date,discharge_date
+SNJ/24/001,Ramesh Kumar,45,M,9876543210,2345 6789 0123,Hardoi,Diabetes,Metformin 500mg BD,15/01/2024,20/01/2024
+JJH-002,Sunita Devi,32,F,8765432109,3456 7890 1234,Lucknow,Hypertension,Amlodipine 5mg OD,10/02/2024,14/02/2024
+SNJ/24/001,Ramesh Kumar,45,M,9876543210,2345 6789 0123,Hardoi,Diabetes,Metformin 500mg BD,22/03/2024,25/03/2024

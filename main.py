@@ -21,9 +21,10 @@ import re
 import sys
 import time
 import unicodedata
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
 
 # ---------------------------------------------------------------------------
 # Policy
@@ -97,10 +98,8 @@ def name_skeleton(name: str) -> str:
     n = normalize_text(name)
     # Transliterate Devanagari
     n = rough_transliterate(n)
-    # Expand abbreviations
-    n = re.sub(r'\bmohammad\b', 'mohammad', n)
-    n = re.sub(r'\bmohd\.?\b', 'mohammad', n)
-    n = re.sub(r'\bmd\.?\b', 'mohammad', n)
+    # Expand abbreviations and variants
+    n = re.sub(r'\b(?:mohammad|mohammed|muhammad|muhammed|mohd\.?|md\.?|mohmmd)\b', 'mohammad', n)
     n = re.sub(r'\bsmt\.?\b', '', n)
     n = re.sub(r'\bshri\.?\b', '', n)
     n = re.sub(r'\bsri\.?\b', '', n)
@@ -185,7 +184,7 @@ DRUG_NAMES = {
     'cap', 'tab', 'inj', 'syp', 'susp', 'drops', 'cream', 'ointment',
     'nebulization', 'neb', 'iv', 'im', 'sc', 'po', 'pr', 'sl',
     'stat', 'sos', 'prn', 'od', 'bd', 'tds', 'qid', 'hs',
-    'ceftriaxone', 'artesunate', 'quinine', 'primaquine',
+    'artesunate', 'quinine', 'primaquine',
     'rifampicin', 'isoniazid', 'pyrazinamide', 'ethambutol', 'streptomycin',
     'att', 'dots', 'rntcp',
     'deriphylline', 'aminophylline', 'theophylline',
@@ -249,7 +248,7 @@ MEDICAL_TERMS = {
     'complaint', 'symptom', 'sign', 'vitals', 'condition', 'stable',
     'improved', 'deteriorated', 'critical', 'guarded', 'poor',
     'diet', 'rest', 'exercise', 'physiotherapy', 'rehabilitation',
-    'follow', 'review', 'advice', 'counselling', 'counseling',
+    'follow', 'advice', 'counselling', 'counseling',
     'nil', 'normal', 'abnormal', 'positive', 'negative', 'reactive',
     'non-reactive', 'elevated', 'low', 'high', 'moderate', 'severe', 'mild',
     'acute', 'chronic', 'subacute', 'recurrent', 'intermittent',
@@ -361,20 +360,25 @@ SAFE_HEADER_TYPES = {
 def classify_header(header: str) -> str | None:
     """Return PII type for a header, or None if safe."""
     h = normalize_text(header).strip()
-    # Strip common prefixes/suffixes
     h = re.sub(r'[_\-./]', ' ', h).strip()
+
+    # Exact match first
     for header_set, pii_type in PII_HEADER_MAP.items():
         if h in header_set:
             return pii_type
-    # Fuzzy: check if any known header is a substring
-    for header_set, pii_type in PII_HEADER_MAP.items():
-        for known in header_set:
-            if known in h or h in known:
-                return pii_type
-    # Safe types
-    for header_set, safe_type in SAFE_HEADER_TYPES.items():
+
+    # Safe-type exact match (age, gender, etc.) — these must NOT be PII
+    for header_set in SAFE_HEADER_TYPES:
         if h in header_set:
             return None
+
+    # Fuzzy: only match if the normalized header CONTAINS the known header as a full word-boundary substring
+    # and the match is at least 3 chars (avoid matching 'e' in 'age' as 'email' etc.)
+    for header_set, pii_type in PII_HEADER_MAP.items():
+        for known in header_set:
+            if len(known) >= 4 and (known in h or h == known):
+                return pii_type
+
     return None
 
 # ---------------------------------------------------------------------------
@@ -406,11 +410,16 @@ RE_PAN = re.compile(r'\b([A-Z]{5}\d{4}[A-Z])\b')
 # Email
 RE_EMAIL = re.compile(r'[\w.+\-]+@[\w\-]+\.[\w.]+')
 
-# MRN/UHID patterns from the hospitals
+# MRN/UHID patterns from the hospitals — also catch labelled UHID: patterns in free text
 RE_MRN = re.compile(
-    r'\b(?:SNJ/\d{2}/\d+|JJH[/-]\d+|UHID[/-]\d+|ADM\d+|DHH[/-]IPD[/-]\d+|'
+    r'\b(?:SNJ/\d{2}/\d+|JJH[/-]\d+|UHID[/-]\d+|ADM\d+|DHH[/-]IPD[/-][\d-]+|'
     r'IP[/-]\d{2}[/-]\d+|IPD[/-]\d{4}[/-]\d+|OPD/\d{2}/\d{2}/\d+|'
     r'INS[/-]\d+|CLM[/-]\d+)\b'
+)
+
+# Labelled UHID/MRN in free text: "UHID: DHH-IPD-2024-001"
+RE_MRN_LABELLED = re.compile(
+    r'(?i)(?:uhid|mrn|patient\s*id|reg(?:istration)?\s*no?|ipd\s*no?|opd\s*no?|case\s*no?|hospital\s*id)\s*:?\s*([\w/\-]+)'
 )
 
 # Date patterns (various Indian formats)
@@ -425,7 +434,7 @@ RE_DATE_ISO = re.compile(
 RE_PIN = re.compile(r'(?<!\d)([1-9]\d{5})(?!\d)')
 
 # Insurance ID pattern
-RE_INSURANCE = re.compile(r'\b(INS[/-]\d+|CLM[/-]\d+)\b', re.I)
+RE_INSURANCE = re.compile(r'\b(INS[/-]\d+|CLM[/-]\d+)\b', re.IGNORECASE)
 
 # House number pattern
 RE_HOUSE = re.compile(
@@ -485,7 +494,6 @@ COMMON_INDIAN_NAMES = {
     'kamla', 'kamala', 'shanti', 'parvati', 'lakshmi', 'saraswati',
     'fatima', 'fatma', 'farida', 'shabana', 'salma', 'zainab', 'amina',
     'reena', 'meera',
-    'sukhwinder',
     # Surnames
     'kumar', 'sharma', 'verma', 'gupta', 'singh', 'chauhan', 'chaudhary',
     'yadav', 'pandey', 'pandeya', 'tiwari', 'mishra', 'thakur', 'lodhi',
@@ -515,7 +523,7 @@ GENERIC_NAME_TOKENS = {
 # Detection engine
 # ---------------------------------------------------------------------------
 class Detection:
-    __slots__ = ('type', 'surface', 'span', 'confidence', 'channel', 'role')
+    __slots__ = ('channel', 'confidence', 'role', 'span', 'surface', 'type')
     def __init__(self, type: str, surface: str, span: tuple[int,int]=(0,0),
                  confidence: float=1.0, channel: str='content', role: str='patient'):
         self.type = type
@@ -527,15 +535,34 @@ class Detection:
 
 def is_dose_context(text: str, start: int, end: int) -> bool:
     """Check if a number-like match is actually a dose/medication context."""
-    context_before = text[max(0, start-80):start].lower()
-    context_after = text[end:end+40].lower()
-    # Look for dose indicators nearby
-    dose_words = ['mg', 'ml', 'mcg', 'iu', 'unit', 'tab', 'cap', 'inj', 'syp',
-                  'dose', 'x ', 'days', 'od', 'bd', 'tds', '1-0-1', '0-1-0',
-                  '1-1-1', '0-0-1', '1-0-0']
-    for w in dose_words:
-        if w in context_before or w in context_after:
-            return True
+    matched = text[start:end]
+    digits_only = re.sub(r'\D', '', matched)
+    if len(digits_only) >= 10:
+        # 10+ digit numbers (phone, Aadhaar, ABHA) are not medical doses
+        return False
+
+    # Check within the same line
+    line_start = text.rfind('\n', 0, start)
+    line_start = 0 if line_start == -1 else line_start + 1
+    line_end = text.find('\n', end)
+    line_end = len(text) if line_end == -1 else line_end
+
+    before_on_line = text[line_start:start].lower()
+    after_on_line = text[end:line_end].lower()
+
+    # If labelled as phone, contact, or ID, never treat as dose
+    if re.search(r'\b(?:phone|mob|mobile|contact|tel|cell|aadhaar|aadhar|uid|abha|mrn|uhid)\b', before_on_line):
+        return False
+
+    # Dose unit immediately following
+    if re.match(r'^\s*(?:mg|ml|mcg|g|iu|units?|tablets?|tabs?|caps?|drops?|puffs?|syp)\b', after_on_line):
+        return True
+
+    # Frequency or drug form on same line
+    if re.search(r'\b(?:od|bd|tds|qid|sos|hs|stat|1-0-1|0-1-0|1-1-1|0-0-1|1-0-0)\b', after_on_line) or \
+       re.search(r'\b(?:tab|cap|inj|syp|dose)\b', before_on_line):
+        return True
+
     return False
 
 def is_doctor(name: str, text: str, pos: int) -> bool:
@@ -567,9 +594,13 @@ def is_complaint_co(text: str, pos: int) -> bool:
 def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     """Detect PII in free text with role-first resolution."""
     detections = []
-    norm_text = normalize_text(text)
 
     # 1. Phone numbers (but not doses)
+    # Also catch labelled patterns: "Phone: 9988776655", "Mob: ..."
+    for m in re.finditer(r'(?i)(?:phone|mob(?:ile)?|contact|tel(?:ephone)?|whatsapp)\s*(?:no\.?|number|#)?\s*:?\s*(\+?91[\s\-]?)?([6-9]\d{4}[\s\-]?\d{5})', text):
+        raw = m.group(0)
+        if not is_dose_context(text, m.start(), m.end()):
+            detections.append(Detection('PHONE', raw, (m.start(), m.end()), channel=channel))
     for m in RE_PHONE.finditer(text):
         raw = m.group(0)
         digits = re.sub(r'\D', '', raw)
@@ -601,9 +632,15 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     for m in RE_EMAIL.finditer(text):
         detections.append(Detection('EMAIL', m.group(0), (m.start(), m.end()), channel=channel))
 
-    # 7. MRN/UHID
+    # 7. MRN/UHID (structured pattern)
     for m in RE_MRN.finditer(text):
         detections.append(Detection('MRN', m.group(0), (m.start(), m.end()), channel=channel))
+
+    # 7b. Labelled UHID/MRN in free text: "UHID: DHH-IPD-2024-001", "Patient ID: ABC123"
+    for m in RE_MRN_LABELLED.finditer(text):
+        val = m.group(1).strip()
+        if val and len(val) >= 3:
+            detections.append(Detection('MRN', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 8. Insurance IDs
     for m in RE_INSURANCE.finditer(text):
@@ -615,14 +652,23 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         detections.append(Detection('HOUSE', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 10. Names - detect using anchored patterns and gazetteer
-    # Patient Name: label
-    for m in re.finditer(r'(?i)(?:patient\s*(?:name)?|rogi\s*(?:ka\s*)?naam|naam|नाम|रोगी\s*का\s*नाम)\s*:?\s*([^\n,;|]+)', text):
+    # Patient Name: label (handle "Patient Name: Priya Sharma", "Patient: Priya Sharma", "Naam: ...")
+    for m in re.finditer(r'(?i)(?:patient\s+name|patient\s*:|rogi\s*(?:ka\s*)?naam|naam\s*:|नाम\s*:|रोगी\s*का\s*नाम|मरीज़?\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text):
         name = m.group(1).strip()
-        if name and len(name) > 1 and not any(d in name.lower() for d in DRUG_NAMES):
-            detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
+        if name and len(name) > 1 and not re.match(r'^(?:presents|admitted|complaining|reported|referred|diagnosed|is|was)\b', name, re.IGNORECASE):
+            if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
 
-    # Relative names from relation cues
-    for m in re.finditer(r'(?i)\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)\s+([A-Z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n]|$)', text):
+    # Also catch bare "Name: Priya Sharma" patterns
+    for m in re.finditer(r'(?i)^(?:name|full\s*name)\s*:\s*([^\n,;|]+)', text, re.MULTILINE):
+        name = m.group(1).strip()
+        if name and len(name) > 1 and not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
+            # Only add if not already captured
+            if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel))
+
+    # Relative names from relation cues (also handle "S/o:", "W/o:", "D/o:" with colons)
+    for m in re.finditer(r'(?i)\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)\s*:?\s*([A-Z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n]|$)', text):
         name = m.group(1).strip()
         if name and len(name) > 1:
             # Remove trailing address-like content
@@ -726,9 +772,7 @@ def make_replacement(det: Detection) -> str:
         return f'[{t}]'
     elif t == 'PHONE':
         return '[PHONE]'
-    elif t == 'AADHAAR':
-        return '[AADHAAR]'
-    elif t == 'AADHAAR_MASKED':
+    elif t == 'AADHAAR' or t == 'AADHAAR_MASKED':
         return '[AADHAAR]'
     elif t == 'ABHA_NUMBER':
         return '[ABHA]'
@@ -759,6 +803,32 @@ def make_replacement(det: Detection) -> str:
     return '[REDACTED]'
 
 
+# ---------------------------------------------------------------------------
+# Removed direct identifiers ledger (for Sweep Verifier)
+# ---------------------------------------------------------------------------
+REMOVED_DIRECT_IDENTIFIERS: set[str] = set()
+
+def record_removed_identifier(det: Detection):
+    """Record a removed identifier so the sweep verifier can audit the output."""
+    s = det.surface.strip()
+    if len(s) < 3:
+        return
+    # Add exact surface
+    REMOVED_DIRECT_IDENTIFIERS.add(s)
+    # Digits if phone or ID
+    digits = re.sub(r'\D', '', s)
+    if len(digits) >= 10:
+        REMOVED_DIRECT_IDENTIFIERS.add(digits)
+    # Name variants
+    if det.type in ('PATIENT_NAME', 'RELATIVE_NAME'):
+        norm = normalize_text(s)
+        if len(norm) >= 3 and norm not in GENERIC_NAME_TOKENS and norm not in MEDICAL_TERMS:
+            REMOVED_DIRECT_IDENTIFIERS.add(norm)
+            skel = name_skeleton(s)
+            if len(skel) >= 3:
+                REMOVED_DIRECT_IDENTIFIERS.add(skel)
+
+
 def clean_text(text: str, channel: str = 'content') -> tuple[str, list[Detection]]:
     """Replace detected PII in text, preserving clinical values and doctor names."""
     detections = detect_pii_in_text(text, channel)
@@ -780,6 +850,7 @@ def clean_text(text: str, channel: str = 'content') -> tuple[str, list[Detection
                 if any(e in name_norm for e in DISEASE_EPONYMS):
                     continue
             filtered.append(d)
+            record_removed_identifier(d)
             if d.span[1] > 0:
                 last_end = d.span[1]
 
@@ -803,6 +874,7 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
         if dets:
             all_dets.extend(dets)
             for d in dets:
+                record_removed_identifier(d)
                 v = v.replace(d.surface, make_replacement(d))
         return v, all_dets
     if isinstance(v, list):
@@ -815,13 +887,15 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
     if isinstance(v, dict):
         result = {}
         for k, x in v.items():
-            # Clean key
-            key_dets = detect_pii_in_text(k, 'key')
+            # Only scan the KEY itself for PII if it looks like free-text (long or has Devanagari).
+            # Schema field names like "patient_name" are structural — never rename them.
             new_k = k
-            if key_dets:
-                for d in key_dets:
-                    new_k = new_k.replace(d.surface, make_replacement(d))
-                all_dets.extend(key_dets)
+            if len(k) > 25 or any('\u0900' <= c <= '\u097F' for c in k):
+                key_dets = detect_pii_in_text(k, 'key')
+                if key_dets:
+                    for d in key_dets:
+                        new_k = new_k.replace(d.surface, make_replacement(d))
+                    all_dets.extend(key_dets)
             # Clean value with header context
             cleaned, dets = clean_value(x, header=k)
             result[new_k] = cleaned
@@ -856,31 +930,35 @@ class PatientCluster:
                     if val_n and len(val_n) >= 4:
                         id_groups[f"{id_type}:{val_n}"].append(rid)
 
-        # Build clusters from strong ID matches
+        # Build clusters from strong ID matches with contradiction checks
         for key, rids in id_groups.items():
             if len(rids) < 2:
                 continue
-            # Check for contradictions before merging
-            # Pick the first record's cluster key or create one
-            canonical = None
-            for rid in rids:
-                if rid in self.record_to_cluster:
-                    canonical = self.record_to_cluster[rid]
-                    break
-            if canonical is None:
-                canonical = rids[0]
-                self.clusters[canonical] = set()
-
-            for rid in rids:
-                old = self.record_to_cluster.get(rid)
-                if old and old != canonical:
-                    # Merge clusters if no contradiction
-                    if not self._contradicts(canonical, old):
-                        self.clusters[canonical].update(self.clusters.pop(old, set()))
-                        for r in list(self.clusters.get(canonical, set())):
-                            self.record_to_cluster[r] = canonical
-                self.clusters[canonical].add(rid)
-                self.record_to_cluster[rid] = canonical
+            for i in range(len(rids)):
+                for j in range(i + 1, len(rids)):
+                    r1, r2 = rids[i], rids[j]
+                    if self._records_contradict(r1, r2):
+                        continue
+                    c1 = self.record_to_cluster.get(r1)
+                    c2 = self.record_to_cluster.get(r2)
+                    if c1 is None and c2 is None:
+                        canonical = r1
+                        self.clusters[canonical] = {r1, r2}
+                        self.record_to_cluster[r1] = canonical
+                        self.record_to_cluster[r2] = canonical
+                    elif c1 is not None and c2 is None:
+                        if not any(self._records_contradict(r2, m) for m in self.clusters[c1]):
+                            self.clusters[c1].add(r2)
+                            self.record_to_cluster[r2] = c1
+                    elif c1 is None and c2 is not None:
+                        if not any(self._records_contradict(r1, m) for m in self.clusters[c2]):
+                            self.clusters[c2].add(r1)
+                            self.record_to_cluster[r1] = c2
+                    elif c1 is not None and c2 is not None and c1 != c2:
+                        if not self._contradicts(c1, c2):
+                            self.clusters[c1].update(self.clusters.pop(c2, set()))
+                            for m in list(self.clusters[c1]):
+                                self.record_to_cluster[m] = c1
 
         # Phase 2: Name-based linking for unlinked records
         # Group by name skeleton
@@ -919,26 +997,28 @@ class PatientCluster:
                 for rid in rids:
                     self.record_to_cluster[rid] = canonical
 
+    def _records_contradict(self, rid1: str, rid2: str) -> bool:
+        """Check if two records contradict each other on gender or age."""
+        ev1 = self.evidence.get(rid1, {})
+        ev2 = self.evidence.get(rid2, {})
+        g1, g2 = ev1.get('gender'), ev2.get('gender')
+        if g1 and g2 and g1.upper() != g2.upper():
+            return True
+        a1, a2 = ev1.get('age'), ev2.get('age')
+        if a1 and a2:
+            try:
+                if abs(int(a1) - int(a2)) > 5:
+                    return True
+            except (ValueError, TypeError):
+                pass
+        return False
+
     def _contradicts(self, cluster1: str, cluster2: str) -> bool:
         """Check if two clusters have contradicting evidence."""
-        # Gather evidence from both clusters
-        evs1 = [self.evidence.get(r, {}) for r in self.clusters.get(cluster1, set())]
-        evs2 = [self.evidence.get(r, {}) for r in self.clusters.get(cluster2, set())]
-
-        for ev1 in evs1:
-            for ev2 in evs2:
-                # Gender contradiction
-                g1, g2 = ev1.get('gender'), ev2.get('gender')
-                if g1 and g2 and g1 != g2:
+        for r1 in self.clusters.get(cluster1, set()):
+            for r2 in self.clusters.get(cluster2, set()):
+                if self._records_contradict(r1, r2):
                     return True
-                # Age contradiction (more than 5 years apart)
-                a1, a2 = ev1.get('age'), ev2.get('age')
-                if a1 and a2:
-                    try:
-                        if abs(int(a1) - int(a2)) > 5:
-                            return True
-                    except (ValueError, TypeError):
-                        pass
         return False
 
     def _has_corroboration(self, record_id: str, cluster_key: str) -> bool:
@@ -1057,21 +1137,21 @@ def extract_evidence_text(text: str) -> dict[str, Any]:
     if m:
         ev['age'] = m.group(1)
     # Alt: "52 Yrs/F" or "48/M"
-    m = re.search(r'(\d{1,3})\s*(?:yrs?|years?|वर्ष)\s*/\s*([MF])', text, re.I)
+    m = re.search(r'(\d{1,3})\s*(?:yrs?|years?|वर्ष)\s*/\s*([MF])', text, re.IGNORECASE)
     if m:
         ev.setdefault('age', m.group(1))
         ev['gender'] = m.group(2).upper()
-    m = re.search(r'(\d{1,3})\s*/\s*([MF])\b', text, re.I)
+    m = re.search(r'(\d{1,3})\s*/\s*([MF])\b', text, re.IGNORECASE)
     if m:
         ev.setdefault('age', m.group(1))
         ev.setdefault('gender', m.group(2).upper())
 
     # Gender from relation type
-    if re.search(r'\bw/o\b', text, re.I):
+    if re.search(r'\bw/o\b', text, re.IGNORECASE):
         ev.setdefault('gender', 'F')
-    elif re.search(r'\bs/o\b', text, re.I):
+    elif re.search(r'\bs/o\b', text, re.IGNORECASE):
         ev.setdefault('gender', 'M')
-    elif re.search(r'\bd/o\b', text, re.I):
+    elif re.search(r'\bd/o\b', text, re.IGNORECASE):
         ev.setdefault('gender', 'F')
 
     # Village
@@ -1189,6 +1269,18 @@ def decode(raw: bytes) -> str | None:
         return raw[3:].decode("utf-8", errors="strict")
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         return raw.decode("utf-16")
+    # Check UTF-16 without BOM if null bytes present
+    if b"\x00" in raw:
+        nulls_even = sum(1 for i in range(0, min(len(raw), 100), 2) if raw[i] == 0)
+        nulls_odd = sum(1 for i in range(1, min(len(raw), 100), 2) if raw[i] == 0)
+        enc_order = ("utf-16-be", "utf-16-le") if nulls_even > nulls_odd else ("utf-16-le", "utf-16-be")
+        for enc in enc_order:
+            try:
+                decoded = raw.decode(enc)
+                if "\x00" not in decoded:
+                    return decoded
+            except UnicodeError:
+                pass
     for enc in ("utf-8", "cp1252"):
         try:
             return raw.decode(enc)
@@ -1203,6 +1295,35 @@ class Stats:
     linked = 0
     generalized = 0
     suppressed = 0
+
+
+# ---------------------------------------------------------------------------
+# Date string shifting helper
+# ---------------------------------------------------------------------------
+_DATE_FMTS = [
+    ('%d/%m/%Y', re.compile(r'^\d{1,2}/\d{1,2}/\d{4}$')),
+    ('%d-%m-%Y', re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$')),
+    ('%d.%m.%Y', re.compile(r'^\d{1,2}\.\d{1,2}\.\d{4}$')),
+    ('%Y-%m-%d', re.compile(r'^\d{4}-\d{1,2}-\d{1,2}$')),
+    ('%Y/%m/%d', re.compile(r'^\d{4}/\d{1,2}/\d{1,2}$')),
+    ('%d/%m/%y', re.compile(r'^\d{1,2}/\d{1,2}/\d{2}$')),
+    ('%d-%m-%y', re.compile(r'^\d{1,2}-\d{1,2}-\d{2}$')),
+]
+
+def _try_shift_date_str(value: str, offset_days: int) -> str | None:
+    """Try to parse value as a date and return it shifted by offset_days. Returns None if not a date."""
+    v = value.strip()
+    if not v:
+        return None
+    for fmt, pattern in _DATE_FMTS:
+        if pattern.match(v):
+            try:
+                d = dt.datetime.strptime(v, fmt).date()
+                shifted = d + dt.timedelta(days=offset_days)
+                return shifted.strftime(fmt)
+            except ValueError:
+                continue
+    return None
 
 
 def process_csv(text: str, delimiter: str, rel: str, records: list,
@@ -1232,6 +1353,14 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
         ev = extract_evidence_csv(row, header)
         linker.add_evidence(record_id, ev)
 
+        # Derive a per-row patient key for date shifting (may be refined after linkage)
+        # Use the strongest available ID; fallback to record_id
+        patient_key = (
+            ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+            ev.get('phone') or ev.get('email') or record_id
+        )
+        shift = date_shift_days(patient_key)
+
         # Clean each cell
         clean_row = []
         for j, cell in enumerate(row):
@@ -1244,6 +1373,8 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
                              'AADHAAR', 'ABHA_NUMBER', 'PAN', 'MRN', 'INSURANCE_ID',
                              'ADDRESS', 'DOB'):
                     Stats.identifiers += 1
+                    if cell and len(cell.strip()) >= 3:
+                        record_removed_identifier(Detection(h_type, cell.strip()))
                     clean_row.append(f'[{h_type}]')
                 elif h_type == 'VILLAGE':
                     # Generalize village to district
@@ -1260,7 +1391,29 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
                 else:
                     clean_row.append(f'[{h_type}]')
             else:
-                # Non-PII column: still scan for embedded PII
+                # Non-PII column: check for dates and age to transform
+                h_norm = normalize_text(h) if h else ''
+
+                # Date columns: shift coherently
+                if h and any(d in h_norm for d in ('date', 'admission', 'discharge', 'doj', 'dod', 'visit', 'तारीख', 'दिनांक')):
+                    shifted = _try_shift_date_str(cell, shift)
+                    if shifted:
+                        clean_row.append(shifted)
+                        continue
+
+                # Age columns: replace with band
+                if h and h_norm in {'age', 'umar', 'उम्र', 'आयु'}:
+                    age_m = re.search(r'\d+', cell)
+                    if age_m:
+                        try:
+                            band = age_band(int(age_m.group()))
+                            clean_row.append(band)
+                            Stats.generalized += 1
+                            continue
+                        except ValueError:
+                            pass
+
+                # Otherwise scan for embedded PII
                 cleaned, dets = clean_text(cell)
                 Stats.identifiers += len(dets)
                 clean_row.append(cleaned)
@@ -1331,11 +1484,128 @@ def process_text(text: str, rel: str, records: list,
 
 def peak_rss_mb() -> float:
     try:
+        import os
+
+        import psutil
+        p = psutil.Process(os.getpid())
+        return round(p.memory_info().rss / 1_048_576, 1)
+    except Exception:
+        pass
+    try:
         import resource
         r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return round(r / 1024 if sys.platform != "darwin" else r / 1048576, 1)
     except Exception:
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Sweep Verifier (Technique 5)
+# ---------------------------------------------------------------------------
+def _quarantine_file(entry: dict, file_path: Path, reason: str, quarantined_set: set):
+    try:
+        if file_path.exists():
+            file_path.unlink()
+    except Exception:
+        pass
+    if entry.get("output"):
+        quarantined_set.add(entry["output"])
+    entry["output"] = None
+    entry["status"] = "quarantined"
+    entry["reason"] = reason
+
+
+def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[dict]) -> None:
+    """Sweep verifier: check all sanitized outputs for leaks before release."""
+    secret_str = SECRET.decode('utf-8', errors='ignore') if SECRET else ""
+    safe_veto = (
+        MEDICAL_TERMS | DISEASE_EPONYMS | DRUG_NAMES | GENERIC_NAME_TOKENS |
+        {'[patient_name]', '[relative_name]', '[phone]', '[aadhaar]', '[mrn]', '[email]',
+         '[village]', '[pin]', '[pan]', '[abha]', '[dob]', '[address]', '[house]',
+         '[locality]', '[landmark]', '[insurance_id]', '[redacted]'}
+    )
+
+    probe_values = set()
+    for v in REMOVED_DIRECT_IDENTIFIERS:
+        v_low = v.lower().strip()
+        if len(v_low) >= 4 and v_low not in safe_veto:
+            probe_values.add(v_low)
+
+    re_canary = re.compile(r'(?i)\b(?:canary[-_][a-z0-9_-]+)\b')
+    re_aadhaar_raw = re.compile(r'(?<!\d)[2-9]\d{3}\s?\d{4}\s?\d{4}(?!\d)')
+    re_phone_raw = re.compile(r'(?<!\d)(?:\+?91[\s\-]?)?[6-9]\d{9}(?!\d)')
+
+    quarantined_outputs: set[str] = set()
+
+    for entry in files_report:
+        if entry.get("status") != "sanitized" or not entry.get("output"):
+            continue
+        rel = entry["output"].replace("sanitized/", "", 1)
+        target_file = san_dir / rel
+        if not target_file.exists():
+            continue
+
+        filename_lower = target_file.name.lower()
+        if secret_str and len(secret_str) >= 4 and secret_str in filename_lower:
+            _quarantine_file(entry, target_file, "secret_leaked_in_filename", quarantined_outputs)
+            continue
+        if re_canary.search(filename_lower):
+            _quarantine_file(entry, target_file, "canary_in_filename", quarantined_outputs)
+            continue
+
+        try:
+            content = target_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            _quarantine_file(entry, target_file, "unreadable_sanitized_file", quarantined_outputs)
+            continue
+
+        if secret_str and len(secret_str) >= 4 and secret_str in content:
+            _quarantine_file(entry, target_file, "secret_leaked_in_content", quarantined_outputs)
+            continue
+
+        if re_canary.search(content):
+            _quarantine_file(entry, target_file, "canary_leak_detected", quarantined_outputs)
+            continue
+
+        # Check raw numbers
+        content_lines = content.splitlines()
+        leak_found = False
+        for line in content_lines:
+            for m in re_phone_raw.finditer(line):
+                if not is_dose_context(line, m.start(), m.end()):
+                    leak_found = True
+                    break
+            if leak_found:
+                break
+
+            for m in re_aadhaar_raw.finditer(line):
+                val = re.sub(r'\D', '', m.group(0))
+                if val in probe_values:
+                    leak_found = True
+                    break
+            if leak_found:
+                break
+
+        if leak_found:
+            _quarantine_file(entry, target_file, "identifier_leak_detected", quarantined_outputs)
+            continue
+
+        # Check probe values (names, sensitive tokens)
+        content_norm = normalize_text(content)
+        for pv in probe_values:
+            if pv.isascii() and pv.isalpha():
+                if re.search(rf'\b{re.escape(pv)}\b', content_norm):
+                    leak_found = True
+                    break
+            elif pv in content_norm:
+                leak_found = True
+                break
+
+        if leak_found:
+            _quarantine_file(entry, target_file, "sweep_verifier_leak_detected", quarantined_outputs)
+
+    if quarantined_outputs:
+        records[:] = [r for r in records if r["file"] not in quarantined_outputs]
 
 
 # ---------------------------------------------------------------------------
@@ -1519,6 +1789,9 @@ def main() -> int:
                     file_path.write_text(content, encoding="utf-8", newline="")
                 except (OSError, UnicodeError):
                     pass
+
+    # Phase 5: Sweep Verifier (Technique 5)
+    run_sweep_verifier(san, files_report, final_records)
 
     # Write records.jsonl
     with open(out / "records.jsonl", "w", encoding="utf-8") as f:

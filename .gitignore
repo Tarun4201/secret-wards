@@ -45,3 +45,10 @@ my_output/
 .DS_Store
 .idea/
 .vscode/
+
+# Ruff cache
+.ruff_cache/
+
+# Test I/O dirs (fixtures are in tests/fixtures/)
+test_input/
+test_output/
