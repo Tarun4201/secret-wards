@@ -221,8 +221,7 @@ pip install -r requirements-dev.txt
 Verify installation and run tests:
 
 ```powershell
-make test
-# or: python -m unittest discover -s tests -p "test_*.py"
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### Pre-Download All Wheels for Offline Install
@@ -308,8 +307,6 @@ python main.py --input ..\toolkit\dev\input --output .\output
 .\.venv\Scripts\Activate.ps1
 
 # Run all 67 tests
-make test
-# or equivalently:
 python -m unittest discover -s tests -p "test_*.py"
 
 # Run a specific test file
@@ -321,6 +318,8 @@ python -m unittest discover -s tests -p "test_*.py" -v
 # Run with pytest (if installed)
 pytest tests/ -v
 ```
+
+> **Note (macOS / Linux):** You can also use `make test` where GNU `make` is installed.
 
 ### Test Categories
 
@@ -357,12 +356,12 @@ python tools/attacker/attacker.py `
 
 ### Run the Full Benchmark Suite
 
-```bash
+```powershell
 # Privacy vs utility benchmark
-make bench
+python tools/benchmark/benchmark.py
 
 # Ablation study (tests each technique's contribution)
-make ablation
+python tools/benchmark/ablation.py
 ```
 
 ---
@@ -523,11 +522,12 @@ Check `report.json` for quarantine reasons. Common causes:
 
 ### Tests fail on a fresh clone
 
-```bash
-# Make sure you have dev dependencies
+```powershell
+# Make sure your virtual environment is active and dev dependencies are installed
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 # Run tests
-make test
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
 ---
