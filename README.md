@@ -66,7 +66,7 @@ pip install -r requirements.txt
 # Run firewall
 RAKSHA_SECRET="your-secret-key" python main.py --input /path/to/input --output /path/to/output
 
-# Run unit tests (52 tests across Tier 1, Tier 2, and Tier 3)
+# Run unit tests (63 tests across Tier 1, Tier 2, and Tier 3)
 make test
 
 # Run RAKSHA privacy vs utility benchmark
