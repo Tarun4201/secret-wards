@@ -1,13 +1,22 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
+  <img alt="RAKSHA Pipeline: Safe Ingestion → Detector + Veto → Cross-Script Linkage → Keyed Transform → Sweep Verifier → Output Contract" src="docs/assets/pipeline-light.svg" width="100%">
+</picture>
+
 # 🛡️ RAKSHA — Evidence-Guided Privacy Compiler
 
 **Track 3: Secret Wards | Yugaantar DevForge Hackathon**
 
-> Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records.
+*Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records.*
 
 [![Status](https://img.shields.io/badge/status-READY%20TO%20SUBMIT-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![Tests](https://img.shields.io/badge/tests-67%2F67%20passing-brightgreen)]()
 [![Leaks](https://img.shields.io/badge/PII%20leaks-0%25-brightgreen)]()
+
+</div>
 
 ---
 
@@ -54,7 +63,7 @@ RAKSHA is a privacy pipeline that:
 | Canary traps leaked | **0 / 4** |
 | Medical data preserved | **4,854 / 4,855 (99.98%)** |
 | Patient linkage precision | **1.00 (0 false merges)** |
-| Patient linkage recall | **0.70** |
+| Patient linkage recall | **1.00 (F0.5: 1.00)** |
 | Attacker re-identification | **0.0%** (vs 53% on raw data) |
 | Unit tests | **67 / 67 passing** |
 | Official contract | ✅ `CONTRACT OK` |
