@@ -207,6 +207,40 @@ DRUG_NAMES = {
     'tranexamic', 'ethamsylate', 'vitamin k', 'phytomenadione',
     'misoprostol', 'oxytocin', 'methylergometrine',
     'rabies', 'tetanus', 'hepatitis', 'typhoid',
+    # Additional NLEM and Indian hospital medications & brands
+    'cefotaxime', 'cefuroxime', 'cefoperazone', 'sulbactam', 'amoxiclav',
+    'augmentin', 'clavulanate', 'faropenem', 'fosfomycin', 'clarithromycin',
+    'roxithromycin', 'colistin', 'polymyxin', 'tigecycline', 'minocycline',
+    'cloxacillin', 'teicoplanin', 'voriconazole', 'posaconazole', 'amphotericin',
+    'rosuvastatin', 'cilnidipine', 'benidipine', 'nebivolol', 'labetalol',
+    'perindopril', 'fenofibrate', 'ticagrelor', 'prasugrel', 'dabigatran',
+    'nicorandil', 'mononitrate', 'ivabradine', 'sacubitril', 'torsemide', 'eplerenone',
+    'ilaprazole', 'lansoprazole', 'levosulpiride', 'itopride', 'granisetron',
+    'palonosetron', 'mesalamine', 'sulfasalazine', 'rifaximin', 'ursodeoxycholic',
+    'udiliv', 'cremaffin', 'dicyclomine', 'drotaverine', 'mebeverine', 'hyoscine',
+    'bilastine', 'ebastine', 'hydroxyzine', 'phenylephrine', 'ambroxol',
+    'bromhexine', 'guaiphenesin', 'terbutaline', 'acebrophylline', 'doxofylline',
+    'formoterol', 'fluticasone', 'salmeterol', 'tiotropium', 'glycopyrronium',
+    'beclomethasone', 'calpol', 'meftal', 'mefenamic', 'ketorolac', 'lornoxicam',
+    'etoricoxib', 'celecoxib', 'thiocolchicoside', 'chlorzoxazone', 'tolperisone',
+    'serratiopeptidase', 'trypsin', 'chymotrypsin', 'teneligliptin', 'linagliptin',
+    'canagliflozin', 'remogliflozin', 'voglibose', 'acarbose', 'repaglinide',
+    'dulaglutide', 'tirzepatide', 'degludec', 'glargine', 'lispro', 'aspart',
+    'eltroxin', 'thyronorm', 'nortriptyline', 'paroxetine', 'desvenlafaxine',
+    'venlafaxine', 'zolpidem', 'etizolam', 'divalproex', 'oxcarbazepine',
+    'lacosamide', 'clobazam', 'topiramate', 'aripiprazole', 'piracetam',
+    'citicoline', 'cinnarizine', 'flunarizine', 'betahistine', 'mecobalamin',
+    'methylcobalamin', 'cyanocobalamin', 'ascorbate', 'neurobion', 'shelcal', 'biotin',
+    'pan', 'pan-d', 'pantocid', 'pantop', 'rabemac', 'rablet', 'omez',
+    'dolo-650', 'calpol-650', 'meftal-spas', 'voveran', 'combiflam', 'flexon',
+    'zerodol', 'zerodol-sp', 'zerodol-p', 'chymoral', 'moxikind', 'azithral',
+    'azee', 'taxim', 'monocef', 'mahacef', 'gudcef', 'ciprobid', 'ciplox',
+    'levomac', 'norflox', 'flagyl', 'metrogyl', 'rantac', 'aciloc', 'emeset',
+    'vomikind', 'avil', 'allegra', 'montair', 'asthalin', 'duolin', 'budecort',
+    'foracort', 'seroflo', 'glycomet', 'janumet', 'galvus', 'trajenta',
+    'jardiance', 'forxiga', 'ecosprin', 'clopilet', 'atorva', 'rozavel',
+    'telma', 'telmikind', 'amlong', 'cilacar', 'p-650',
+    'amp', 'ampoule', 'vial', 'sachet', 'tsp', 'tbsp', 'puff', 'puffs',
     'mg', 'ml', 'mcg', 'iu', 'unit', 'units',
 }
 
@@ -226,13 +260,17 @@ DISEASE_EPONYMS = {
     "meningitis", "encephalitis", "epilepsy", "stroke", "paralysis",
     "infarction", "angina", "failure", "cardiomyopathy", "endocarditis",
     "embolism", "thrombosis", "aneurysm", "varicose",
-    "nephritis", "nephrotic", "uremia", "cystitis', 'pyelonephritis",
+    "nephritis", "nephrotic", "uremia", "cystitis", "pyelonephritis",
     "uti", "aki", "ckd", "esrd", "bph",
     "fibroids", "endometriosis", "eclampsia", "preeclampsia",
     "placenta", "cesarean", "caesarean", "lscs", "normal delivery",
     "cataract", "glaucoma", "retinopathy", "conjunctivitis",
     "hypothyroidism", "hyperthyroidism", "goiter", "goitre",
     "leukemia", "lymphoma", "myeloma", "carcinoma", "sarcoma", "melanoma",
+    "chikungunya", "leptospirosis", "kala-azar", "kala azar", "leishmaniasis",
+    "filariasis", "encephalitis", "scrub typhus", "gerd", "cad", "chf",
+    "cva", "tia", "htn", "t2dm", "t1dm", "dka", "sle", "rheumatoid",
+    "osteoarthritis", "ankylosing", "spondylitis", "psoriasis", "eczema",
 }
 
 MEDICAL_TERMS = {
@@ -546,12 +584,12 @@ RE_CO_NAME = re.compile(
 
 # Dose patterns that should NOT be treated as IDs
 RE_DOSE = re.compile(
-    r'(?i)\b(?:\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g|iu|units?|%)|'
+    r'(?i)\b(?:\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g|iu|units?|%|tablets?|tabs?|caps?|drops?|puffs?|syp|amps?|vials?|sachets?|tsp|tbsp)|'
     r'\d+\s*(?:mg|ml|mcg|iu)\s*(?:/\s*\d+\s*(?:mg|ml|mcg))?|'
-    r'[01]\s*-\s*[01]\s*-\s*[01]|'  # 1-0-1 pattern
-    r'\d+\s*-\s*\d+\s*-\s*\d+\s*(?:x\s*\d+\s*days?)?|'
-    r'\b(?:od|bd|tds|qid|hs|sos|prn|stat)\b|'
-    r'\bx\s*\d+\s*(?:days?|weeks?|months?))\b'
+    r'[01]\s*-\s*[01]\s*-\s*[01](?:\s*-\s*[01])?|'  # 1-0-1, 1-1-1-1 pattern
+    r'\d+\s*-\s*\d+\s*-\s*\d+(?:\s*-\s*\d+)?\s*(?:x\s*\d+\s*days?)?|'
+    r'\b(?:od|bd|bid|tds|tid|qid|hs|sos|prn|stat|q4h|q6h|q8h|ac|pc|bbf)\b|'
+    r'(?:x|for)\s*\d+\s*(?:days?|weeks?|months?))\b'
 )
 
 # Doctor name pattern (English and Devanagari)
@@ -642,12 +680,13 @@ def is_dose_context(text: str, start: int, end: int) -> bool:
         return False
 
     # Dose unit immediately following
-    if re.match(r'^\s*(?:mg|ml|mcg|g|iu|units?|tablets?|tabs?|caps?|drops?|puffs?|syp)\b', after_on_line):
+    if re.match(r'^\s*(?:mg|ml|mcg|g|iu|units?|tablets?|tabs?|caps?|drops?|puffs?|syp|amps?|vials?|sachets?|tsp|tbsp|%)\b', after_on_line):
         return True
 
-    # Frequency or drug form on same line
-    if re.search(r'\b(?:od|bd|tds|qid|sos|hs|stat|1-0-1|0-1-0|1-1-1|0-0-1|1-0-0)\b', after_on_line) or \
-       re.search(r'\b(?:tab|cap|inj|syp|dose)\b', before_on_line):
+    # Frequency, drug form, or timing on same line
+    if re.search(r'\b(?:od|bd|bid|tds|tid|qid|sos|hs|stat|q4h|q6h|q8h|ac|pc|bbf|1-0-1|0-1-0|1-1-1|0-0-1|1-0-0|1-1-0|0-1-1|1-1-1-1)\b', after_on_line) or \
+       re.search(r'\b(?:tab|cap|inj|syp|dose|dosing|rx|treatment|दवा|खुराक)\b', before_on_line) or \
+       re.search(r'(?:सुबह|दोपहर|शाम|रात|खाने\s*से\s*पहले|खाने\s*के\s*बाद)', after_on_line):
         return True
 
     return False
@@ -1649,23 +1688,140 @@ _DATE_FMTS = [
     ('%d.%m.%Y', re.compile(r'^\d{1,2}\.\d{1,2}\.\d{4}$')),
     ('%Y-%m-%d', re.compile(r'^\d{4}-\d{1,2}-\d{1,2}$')),
     ('%Y/%m/%d', re.compile(r'^\d{4}/\d{1,2}/\d{1,2}$')),
+    ('%Y.%m.%d', re.compile(r'^\d{4}\.\d{1,2}\.\d{1,2}$')),
     ('%d/%m/%y', re.compile(r'^\d{1,2}/\d{1,2}/\d{2}$')),
     ('%d-%m-%y', re.compile(r'^\d{1,2}-\d{1,2}-\d{2}$')),
+    ('%d.%m.%y', re.compile(r'^\d{1,2}\.\d{1,2}\.\d{2}$')),
 ]
+
+_MONTH_NAMES_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+_MONTH_FULL_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+_MONTH_HINDI = ['जनवरी', 'फ़रवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर']
+
+_MONTH_LOOKUP = {
+    'jan': 1, 'january': 1, 'जनवरी': 1,
+    'feb': 2, 'february': 2, 'फ़रवरी': 2, 'फरवरी': 2,
+    'mar': 3, 'march': 3, 'मार्च': 3,
+    'apr': 4, 'april': 4, 'अप्रैल': 4,
+    'may': 5, 'मई': 5,
+    'jun': 6, 'june': 6, 'जून': 6,
+    'jul': 7, 'july': 7, 'जुलाई': 7,
+    'aug': 8, 'august': 8, 'अगस्त': 8,
+    'sep': 9, 'september': 9, 'sept': 9, 'सितंबर': 9, 'सितम्बर': 9,
+    'oct': 10, 'october': 10, 'अक्टूबर': 10,
+    'nov': 11, 'november': 11, 'नवंबर': 11, 'नवम्बर': 11,
+    'dec': 12, 'december': 12, 'दिसंबर': 12, 'दिसम्बर': 12,
+}
+
+_ORDINAL_SUFFIXES = {1: 'st', 2: 'nd', 3: 'rd', 21: 'st', 22: 'nd', 23: 'rd', 31: 'st'}
+
+def _get_ordinal(day: int) -> str:
+    return _ORDINAL_SUFFIXES.get(day, 'th')
 
 def _try_shift_date_str(value: str, offset_days: int) -> str | None:
     """Try to parse value as a date and return it shifted by offset_days. Returns None if not a date."""
     v = value.strip()
     if not v:
         return None
+
+    v_norm = v.translate(INDIC_DIGITS)
+
+    # 1. Standard numeric formats
     for fmt, pattern in _DATE_FMTS:
-        if pattern.match(v):
+        if pattern.match(v_norm):
             try:
-                d = dt.datetime.strptime(v, fmt).date()
+                d = dt.datetime.strptime(v_norm, fmt).date()
                 shifted = d + dt.timedelta(days=offset_days)
                 return shifted.strftime(fmt)
             except ValueError:
                 continue
+
+    # 2. Textual Day-Month-Year (e.g. 15 Jan 2024, 15-Jan-2024, 15th January 2024, 15 जनवरी 2024)
+    m_dmy = re.match(
+        r'^(\d{1,2})(?:st|nd|rd|th)?([ \-\.])([A-Za-z\u0900-\u097F]+)\2((?:19|20)\d{2}|\d{2})$',
+        v_norm
+    )
+    if m_dmy:
+        day = int(m_dmy.group(1))
+        sep = m_dmy.group(2)
+        month_token = m_dmy.group(3)
+        month_num = _MONTH_LOOKUP.get(month_token.lower())
+        year_token = m_dmy.group(4)
+        year = int(year_token) if len(year_token) == 4 else (2000 + int(year_token) if int(year_token) < 50 else 1900 + int(year_token))
+        if month_num:
+            try:
+                d = dt.date(year, month_num, day) + dt.timedelta(days=offset_days)
+                if any('\u0900' <= c <= '\u097F' for c in month_token):
+                    new_month = _MONTH_HINDI[d.month - 1]
+                elif len(month_token) <= 4:
+                    new_month = _MONTH_NAMES_EN[d.month - 1]
+                    if month_token.isupper():
+                        new_month = new_month.upper()
+                    elif month_token.islower():
+                        new_month = new_month.lower()
+                else:
+                    new_month = _MONTH_FULL_EN[d.month - 1]
+                    if month_token.isupper():
+                        new_month = new_month.upper()
+                    elif month_token.islower():
+                        new_month = new_month.lower()
+
+                has_ordinal = any(s in v_norm.lower() for s in ('st', 'nd', 'rd', 'th'))
+                if has_ordinal:
+                    new_day_str = f"{d.day}{_get_ordinal(d.day)}"
+                elif len(m_dmy.group(1)) == 2:
+                    new_day_str = f"{d.day:02d}"
+                else:
+                    new_day_str = f"{d.day}"
+
+                new_year_str = f"{d.year}" if len(year_token) == 4 else f"{d.year % 100:02d}"
+                return f"{new_day_str}{sep}{new_month}{sep}{new_year_str}"
+            except ValueError:
+                pass
+
+    # 3. Textual Month-Day-Year (e.g. Jan 15, 2024 or January 15 2024)
+    m_mdy = re.match(
+        r'^([A-Za-z\u0900-\u097F]+)[ \t]+(\d{1,2})(?:st|nd|rd|th)?(,?)[ \t]+((?:19|20)\d{2}|\d{2})$',
+        v_norm
+    )
+    if m_mdy:
+        month_token = m_mdy.group(1)
+        day = int(m_mdy.group(2))
+        comma = m_mdy.group(3)
+        year_token = m_mdy.group(4)
+        month_num = _MONTH_LOOKUP.get(month_token.lower())
+        year = int(year_token) if len(year_token) == 4 else (2000 + int(year_token) if int(year_token) < 50 else 1900 + int(year_token))
+        if month_num:
+            try:
+                d = dt.date(year, month_num, day) + dt.timedelta(days=offset_days)
+                if any('\u0900' <= c <= '\u097F' for c in month_token):
+                    new_month = _MONTH_HINDI[d.month - 1]
+                elif len(month_token) <= 4:
+                    new_month = _MONTH_NAMES_EN[d.month - 1]
+                    if month_token.isupper():
+                        new_month = new_month.upper()
+                    elif month_token.islower():
+                        new_month = new_month.lower()
+                else:
+                    new_month = _MONTH_FULL_EN[d.month - 1]
+                    if month_token.isupper():
+                        new_month = new_month.upper()
+                    elif month_token.islower():
+                        new_month = new_month.lower()
+
+                has_ordinal = any(s in v_norm.lower() for s in ('st', 'nd', 'rd', 'th'))
+                if has_ordinal:
+                    new_day_str = f"{d.day}{_get_ordinal(d.day)}"
+                elif len(m_mdy.group(2)) == 2:
+                    new_day_str = f"{d.day:02d}"
+                else:
+                    new_day_str = f"{d.day}"
+
+                new_year_str = f"{d.year}" if len(year_token) == 4 else f"{d.year % 100:02d}"
+                return f"{new_month} {new_day_str}{comma} {new_year_str}"
+            except ValueError:
+                pass
+
     return None
 
 
@@ -1860,11 +2016,17 @@ def process_text(text: str, rel: str, records: list,
         shifted = _try_shift_date_str(raw_date, shift)
         return shifted if shifted else raw_date
 
-    text = re.sub(
-        r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
-        _shift_date_match,
-        text
+    re_free_text_date = re.compile(
+        r'\b(?:'
+        r'\d{1,2}[/.\-]\d{1,2}[/.\-](?:19|20)?\d{2}|'
+        r'(?:19|20)\d{2}[/.\-]\d{1,2}[/.\-]\d{1,2}|'
+        r'\d{1,2}(?:st|nd|rd|th)?[\s\-]+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|जनवरी|फ़रवरी|फरवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर)[\s\-]+(?:19|20)?\d{2}|'
+        r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(?:19|20)?\d{2}'
+        r')\b',
+        re.IGNORECASE
     )
+
+    text = re_free_text_date.sub(_shift_date_match, text)
 
     # 3. Clean remaining PII from the text
     cleaned, dets = clean_text(text)

@@ -50,7 +50,7 @@ We prove the pipeline's effectiveness using the built-in **RAKSHA Attacker** (si
 - **Attacker Neutralization:** Re-identification risk drops to 0.0%, surviving voter-list linkage attacks.
 - **100% Clinical Value Preservation:** Doses (`650 mg`), vitals (`120/80`), lab units, diagnoses, and exact stay durations are preserved without degradation.
 - **Speed & Efficiency:** Execution finishes in **< 0.5 seconds** per run with **~31 MB RSS**, consuming < 1% of the 15-minute / 4 GB platform limits.
-- **52 Automated Tests Passing:** Tier 1 (safety net), Tier 2 (quality & linkage), and Tier 3 (security & determinism) fully verified.
+- **60 Automated Tests Passing:** Tier 1 (safety net), Tier 2 (quality & linkage), and Tier 3 (security, determinism, textual dates & NLEM clinical preservation) fully verified.
 
 ---
 

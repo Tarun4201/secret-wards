@@ -32,3 +32,7 @@
 - **Decision: FHIR R4 Bundle Support:**
   - Extracted linkage evidence from FHIR Patient resource and preserved valid Bundle collection schema.
   - Updated resource references (`subject.reference` -> `Patient/{pseudonym}`).
+- **Decision: Textual Indian Date Shifting & NLEM Clinical Preservation:**
+  - Expanded `_try_shift_date_str` and `process_text` regex to parse and coherently shift Indian textual dates (`15 Jan 2024`, `15-Jan-2024`, `15.01.2024`, `Jan 15, 2024`, and Devanagari `15 जनवरी 2024`), preserving exact stay lengths.
+  - Expanded `DRUG_NAMES` with ~100 essential Indian NLEM formulations and common Indian hospital brands (`pan-d`, `telma`, `combiflam`, `deriphyllin`, `ceftriaxone`, `calpol`, `moxikind`, `zerodol-sp`).
+  - Broadened `is_dose_context` and `RE_DOSE` to protect complex dosing patterns (`1-0-1`, `1-1-1-1`, `OD`, `BD`, `TDS`, `QID`, `HS`, `SOS`, `STAT`, `x 5 days`, `खाने के बाद`) from being misflagged as identifiers.
