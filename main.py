@@ -150,6 +150,14 @@ def name_skeleton(name: str) -> str:
               'bhabhi', 'chacha', 'mama', 'mausi', 'nana', 'nani', 'dada', 'dadi',
               'behenji', 'behen', 'beta', 'beti', 'bibi', 'begum']:
         n = re.sub(rf'\b{h}\b', '', n)
+    # Phonetic and cross-script normalizations
+    n = n.replace('ph', 'f')
+    n = n.replace('w', 'v')
+    n = n.replace('aa', 'a')
+    n = n.replace('ee', 'i')
+    n = n.replace('oo', 'u')
+    # Collapse double consonants
+    n = re.sub(r'([b-df-hj-np-tv-z])\1+', r'\1', n)
     # Remove dots, hyphens, extra spaces
     n = re.sub(r'[.\-,\'\"()\[\]{}]', ' ', n)
     n = ' '.join(n.split())
@@ -879,6 +887,15 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
             if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
                 detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel, role='patient'))
 
+    # Honorific patient mentions in free text: "Arif sahab ka BP...", "Ramesh ji", "Sunita didi"
+    for m in re.finditer(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,})\s+(?:sahab|sahib|ji|didi|bhaiya|babu|साहब|जी|दीदी|भैया|बाबू)\b', text):
+        h_name = m.group(0).strip()
+        f_name = m.group(1).strip()
+        if normalize_text(f_name) not in DOCTOR_NAMES and normalize_text(h_name) not in DOCTOR_NAMES:
+            if not any(d in f_name.lower() for d in DRUG_NAMES) and normalize_text(f_name) not in MEDICAL_TERMS:
+                if not any(d.type in ('PATIENT_NAME', 'RELATIVE_NAME') and m.start() >= d.span[0] and m.end() <= d.span[1] for d in detections):
+                    detections.append(Detection('PATIENT_NAME', h_name, (m.start(), m.end()), channel=channel, role='patient'))
+
     # Doctor names in English and Devanagari (should NOT be removed)
     for m in RE_DOCTOR.finditer(text):
         doc_raw = m.group(1).strip()
@@ -1282,12 +1299,17 @@ class PatientCluster:
             name1, name2 = ev1.get('patient_name'), ev2.get('patient_name')
             if name1 and name2:
                 sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
-                if sk1 and sk2 and sk1 != sk2:
+                tokens1 = set(sk1.split()) if sk1 else set()
+                tokens2 = set(sk2.split()) if sk2 else set()
+                names_match = bool(sk1 and sk2 and (sk1 == sk2 or (tokens1 and tokens2 and (tokens1.issubset(tokens2) or tokens2.issubset(tokens1)))))
+                if sk1 and sk2 and not names_match:
                     rel1, rel2 = ev1.get('relative_name'), ev2.get('relative_name')
                     rel_match = False
                     if rel1 and rel2:
                         rsk1, rsk2 = name_skeleton(rel1), name_skeleton(rel2)
-                        if rsk1 and rsk2 and rsk1 == rsk2:
+                        rtok1 = set(rsk1.split()) if rsk1 else set()
+                        rtok2 = set(rsk2.split()) if rsk2 else set()
+                        if rsk1 and rsk2 and (rsk1 == rsk2 or (rtok1 and rtok2 and (rtok1.issubset(rtok2) or rtok2.issubset(rtok1)))):
                             rel_match = True
                     if not rel_match:
                         return True
@@ -1312,10 +1334,11 @@ class PatientCluster:
         if name1 and name2:
             sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
             if sk1 and sk2:
-                if sk1 == sk2:
+                tokens1, tokens2 = set(sk1.split()), set(sk2.split())
+                if sk1 == sk2 or (tokens1 and tokens2 and tokens1 == tokens2):
                     score += 0.35
-                elif sk1 in sk2 or sk2 in sk1:
-                    score += 0.20
+                elif (tokens1 and tokens2 and (tokens1.issubset(tokens2) or tokens2.issubset(tokens1))) or sk1 in sk2 or sk2 in sk1:
+                    score += 0.25
 
         # Relative name skeleton (weight 0.30)
         rel1, rel2 = ev1.get('relative_name', ''), ev2.get('relative_name', '')
@@ -1428,8 +1451,11 @@ class PatientCluster:
                             close_age = abs(int(a1) - int(a2)) <= 2
                         except (ValueError, TypeError):
                             pass
+                    tokens1 = set(sk1.split()) if sk1 else set()
+                    tokens2 = set(sk2.split()) if sk2 else set()
+                    name_overlap = bool(tokens1 and tokens2 and (tokens1 == tokens2 or tokens1.issubset(tokens2) or tokens2.issubset(tokens1) or sk1 in sk2 or sk2 in sk1))
                     has_corrob = (
-                        (sk1 and sk2 and sk1 == sk2) or
+                        name_overlap or
                         (rel1 and rel2 and rel1 == rel2) or
                         (ev1.get('village') and ev2.get('village') and normalize_text(ev1['village']) == normalize_text(ev2['village'])) or
                         close_age
@@ -1514,7 +1540,11 @@ def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[
         elif h_type == 'RELATIVE_NAME':
             ev['relative_name'] = val
         elif h_type == 'PHONE':
-            ev['phone'] = re.sub(r'[\s\-+]', '', val)
+            digits = re.sub(r'\D', '', val)
+            if len(digits) >= 10:
+                ev['phone'] = digits[-10:]
+            else:
+                ev['phone'] = digits
         elif h_type == 'AADHAAR':
             digits = re.sub(r'\D', '', val)
             if len(digits) >= 8:  # Not fully masked
@@ -1554,9 +1584,14 @@ def extract_evidence_text(text: str) -> dict[str, Any]:
     ev: dict[str, Any] = {}
 
     # Patient name
-    m = re.search(r'(?i)(?:patient\s*(?:name)?|rogi\s*ka\s*naam)\s*:?\s*([^\n,;|]+)', text)
+    m = re.search(r'(?i)(?:patient\s*(?:name)?|rogi\s*(?:ka\s*)?naam|रोगी\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text)
     if m:
         ev['patient_name'] = m.group(1).strip()
+    else:
+        # Also check honorific name mention: "Arif sahab ka BP..."
+        m2 = re.search(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,}\s+(?:sahab|sahib|ji|didi|bhaiya|babu|साहब|जी|दीदी|भैया|बाबू))\b', text)
+        if m2 and normalize_text(m2.group(1)) not in DOCTOR_NAMES:
+            ev['patient_name'] = m2.group(1).strip()
 
     # UHID
     m = RE_MRN.search(text)
@@ -1565,11 +1600,30 @@ def extract_evidence_text(text: str) -> dict[str, Any]:
 
     # Phone
     m = RE_PHONE.search(text)
+    if m and not is_dose_context(text, m.start(), m.end()):
+        digits = re.sub(r'\D', '', m.group(0))
+        if len(digits) >= 10:
+            ev['phone'] = digits[-10:]
+
+    # Aadhaar (12 digits)
+    m = RE_AADHAAR.search(text)
+    if m and not is_dose_context(text, m.start(), m.end()):
+        digits = re.sub(r'\D', '', m.group(0))
+        if len(digits) == 12:
+            ev['aadhaar'] = digits
+
+    # ABHA
+    m = RE_ABHA.search(text)
     if m:
-        ev['phone'] = re.sub(r'[\s\-+]', '', m.group(0))
+        ev['abha'] = re.sub(r'[\s\-]', '', m.group(0))
+
+    # PAN
+    m = RE_PAN.search(text)
+    if m:
+        ev['pan'] = m.group(0).upper()
 
     # Relative
-    m = re.search(r'(?i)\b(?:s/o|d/o|w/o)\s+([A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+(?:\s+[A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+)*)', text)
+    m = re.search(r'(?i)\b(?:s/o|d/o|w/o|c/o|attendant\s*:?\s*c/o|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?)\s*:?\s*([A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+(?:\s+[A-Z\u0900-\u097F][a-zA-Z\u0900-\u097F]+)*)', text)
     if m:
         ev['relative_name'] = m.group(1).strip()
 
@@ -1596,7 +1650,7 @@ def extract_evidence_text(text: str) -> dict[str, Any]:
         ev.setdefault('gender', 'F')
 
     # Village
-    m = re.search(r'(?i)(?:vill\.?|village|gram|gaon|गाँव|ग्राम)\s*:?\s*([A-Z\u0900-\u097F][\w\s]+?)(?:\s*[,;]|\s*(?:tehsil|distt?|dist|तहसील|जिला))', text)
+    m = re.search(r'(?i)(?:vill\.?|village|gram|gaon|गाँव|ग्राम)\s*:?\s*([A-Z\u0900-\u097F][\w\s]+?)(?:\s*[,;\n]|\s*(?:tehsil|distt?|dist|तहसील|जिला)|$)', text)
     if m:
         ev['village'] = m.group(1).strip()
 
