@@ -2184,28 +2184,32 @@ class PrivacyPlanner:
             qi_key = (raw_age_band, loc_qi)
             qi_profiles[qi_key].append(r)
 
-        # Check k-anonymity
+        # Check k-anonymity and widen age bands per file in a single pass
+        files_to_widen: set[str] = set()
         for qi_key, recs in qi_profiles.items():
             if len(recs) < self.min_k:
-                # Group below k: broaden 5-yr age band to 10-yr band
                 for r in recs:
-                    file_path = san_dir / r["file"].replace("sanitized/", "", 1)
-                    if not file_path.exists():
-                        continue
-                    try:
-                        content = file_path.read_text(encoding="utf-8")
-                        # Find 5-year band like [40-44] and broaden to 10-year [40-49]
-                        m = re.search(r'\[(\d{1,3})-(\d{1,3})\]', content)
-                        if m:
-                            lo = int(m.group(1))
-                            lo_10 = (lo // 10) * 10
-                            hi_10 = lo_10 + 9
-                            widened = f"[{lo_10}-{hi_10}]"
-                            content = content.replace(m.group(0), widened)
-                            Stats.generalized += 1
-                            file_path.write_text(content, encoding="utf-8", newline="")
-                    except Exception:
-                        pass
+                    files_to_widen.add(r["file"].replace("sanitized/", "", 1))
+
+        for file_rel in files_to_widen:
+            file_path = san_dir / file_rel
+            if not file_path.exists():
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                # Replace 5-year band like [40-44] with 10-year [40-49]
+                def _widen(m):
+                    lo = int(m.group(1))
+                    lo_10 = (lo // 10) * 10
+                    hi_10 = lo_10 + 9
+                    Stats.generalized += 1
+                    return f"[{lo_10}-{hi_10}]"
+
+                new_content = re.sub(r'\[(\d{1,3})-(\d{1,3})\]', _widen, content)
+                if new_content != content:
+                    file_path.write_text(new_content, encoding="utf-8", newline="")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -2454,80 +2458,86 @@ def main() -> int:
             Stats.linked += 1
         final_records.append(r)
 
-    # Phase 4: Insert pseudonyms into sanitized records
+    # Phase 4: Insert pseudonyms into sanitized records (batched per file to eliminate redundant disk I/O)
+    records_by_file: dict[str, list[dict]] = defaultdict(list)
     for r in final_records:
-        if r["patient"]:
-            file_path = out / r["file"]
-            if file_path.exists():
-                try:
-                    content = file_path.read_text(encoding="utf-8")
-                    ext = file_path.suffix.lower()
-                    if ext in ('.csv', '.tsv'):
-                        # Insert pseudonym into the row
-                        lines = content.split('\n')
-                        loc = r["loc"]
-                        if loc.startswith("row:"):
+        if r.get("patient"):
+            records_by_file[r["file"]].append(r)
+
+    for file_rel, file_recs in records_by_file.items():
+        file_path = out / file_rel
+        if not file_path.exists():
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            ext = file_path.suffix.lower()
+
+            if ext in ('.csv', '.tsv'):
+                lines = content.split('\n')
+                for r in file_recs:
+                    loc = r["loc"]
+                    if loc.startswith("row:"):
+                        try:
                             row_idx = int(loc.split(":")[1])
-                            # Row index is 0-based after header, so +1 for header
-                            line_idx = row_idx + 1
+                            line_idx = row_idx + 1  # 0-based data row after header
                             if line_idx < len(lines) and lines[line_idx]:
-                                # Append pseudonym as a note or replace a [MRN] placeholder
                                 lines[line_idx] = lines[line_idx].replace('[MRN]', r["patient"], 1)
                                 if r["patient"] not in lines[line_idx]:
-                                    # If no MRN placeholder, try PATIENT_NAME
                                     lines[line_idx] = lines[line_idx].replace('[PATIENT_NAME]', r["patient"], 1)
-                        content = '\n'.join(lines)
-                    elif ext == '.json':
-                        # Insert pseudonym into the JSON
-                        try:
-                            data = json.loads(content)
-                            if r["loc"] == "doc":
-                                if isinstance(data, dict):
-                                    if data.get("resourceType") == "Bundle":
-                                        # FHIR Bundle: insert pseudonym into Patient resource and update references
-                                        for entry in data.get("entry", []):
-                                            res = entry.get("resource", {})
-                                            if isinstance(res, dict):
-                                                if res.get("resourceType") == "Patient":
-                                                    res["id"] = r["patient"]
-                                                elif "subject" in res and isinstance(res["subject"], dict):
-                                                    res["subject"]["reference"] = f"Patient/{r['patient']}"
-                                    else:
-                                        data["patient_ref"] = r["patient"]
-                            else:
-                                # Navigate to the record and insert
-                                parts = r["loc"].strip("/").split("/")
-                                current = data
-                                for p in parts[:-1]:
-                                    p = p.replace("~1", "/").replace("~0", "~")
-                                    if isinstance(current, dict):
-                                        current = current.get(p, current)
-                                    elif isinstance(current, list):
-                                        try:
-                                            current = current[int(p)]
-                                        except (ValueError, IndexError):
-                                            break
-                                last = parts[-1].replace("~1", "/").replace("~0", "~")
+                        except (ValueError, IndexError):
+                            pass
+                content = '\n'.join(lines)
+
+            elif ext == '.json':
+                try:
+                    data = json.loads(content)
+                    for r in file_recs:
+                        if r["loc"] == "doc":
+                            if isinstance(data, dict):
+                                if data.get("resourceType") == "Bundle":
+                                    for entry in data.get("entry", []):
+                                        res = entry.get("resource", {})
+                                        if isinstance(res, dict):
+                                            if res.get("resourceType") == "Patient":
+                                                res["id"] = r["patient"]
+                                            elif "subject" in res and isinstance(res["subject"], dict):
+                                                res["subject"]["reference"] = f"Patient/{r['patient']}"
+                                else:
+                                    data["patient_ref"] = r["patient"]
+                        else:
+                            parts = r["loc"].strip("/").split("/")
+                            current = data
+                            for p in parts[:-1]:
+                                p = p.replace("~1", "/").replace("~0", "~")
                                 if isinstance(current, dict):
-                                    current = current.get(last, current)
+                                    current = current.get(p, current)
                                 elif isinstance(current, list):
                                     try:
-                                        current = current[int(last)]
+                                        current = current[int(p)]
                                     except (ValueError, IndexError):
-                                        pass
-                                if isinstance(current, dict):
-                                    current["patient_ref"] = r["patient"]
-                            content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            pass
-                    elif ext == '.txt':
-                        # Prepend pseudonym
-                        if r["patient"] not in content:
-                            content = f"Patient: {r['patient']}\n{content}"
-
-                    file_path.write_text(content, encoding="utf-8", newline="")
-                except (OSError, UnicodeError):
+                                        break
+                            last = parts[-1].replace("~1", "/").replace("~0", "~")
+                            if isinstance(current, dict):
+                                current = current.get(last, current)
+                            elif isinstance(current, list):
+                                try:
+                                    current = current[int(last)]
+                                except (ValueError, IndexError):
+                                    pass
+                            if isinstance(current, dict):
+                                current["patient_ref"] = r["patient"]
+                    content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+                except (json.JSONDecodeError, KeyError, TypeError):
                     pass
+
+            elif ext == '.txt':
+                for r in file_recs:
+                    if r["patient"] not in content:
+                        content = f"Patient: {r['patient']}\n{content}"
+
+            file_path.write_text(content, encoding="utf-8", newline="")
+        except (OSError, UnicodeError):
+            pass
 
     # Phase 4b: Risk-Gated Privacy Planner (Technique 4)
     planner = PrivacyPlanner(min_k=int(POLICY.get("min_group_size", 5)))
