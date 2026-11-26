@@ -394,6 +394,79 @@ def classify_header(header: str) -> str | None:
 
     return None
 
+
+def infer_column_type_from_values(values: list[str]) -> str | None:
+    """Semantic column typing (Technique 6): infer PII type from value fingerprints
+    when header is unknown or unrecognized.
+
+    Returns the PII type string or None if the column appears safe.
+    """
+    if not values:
+        return None
+
+    non_empty = [v.strip() for v in values if v.strip()]
+    if not non_empty:
+        return None
+
+    n = len(non_empty)
+    if n < 2:
+        return None
+
+    # Digit ratio and length stats
+    digit_counts = [sum(c.isdigit() for c in v) / max(len(v), 1) for v in non_empty]
+    avg_digit_ratio = sum(digit_counts) / n
+
+    # Phone: 10+ digit numbers starting 6-9
+    phone_hits = sum(1 for v in non_empty if re.match(r'^(?:\+?91[\s\-]?)?[6-9]\d{9}$', re.sub(r'[\s\-]', '', v)))
+    if phone_hits / n >= 0.5:
+        return 'PHONE'
+
+    # Aadhaar: 12-digit numbers
+    aadhaar_hits = sum(1 for v in non_empty if re.match(r'^[2-9]\d{3}\s?\d{4}\s?\d{4}$', v.strip()))
+    if aadhaar_hits / n >= 0.5:
+        return 'AADHAAR'
+
+    # Email
+    email_hits = sum(1 for v in non_empty if re.match(r'^[\w.+\-]+@[\w\-]+\.[\w.]+$', v))
+    if email_hits / n >= 0.5:
+        return 'EMAIL'
+
+    # PAN: ABCDE1234F
+    pan_hits = sum(1 for v in non_empty if re.match(r'^[A-Z]{5}\d{4}[A-Z]$', v.strip()))
+    if pan_hits / n >= 0.5:
+        return 'PAN'
+
+    # PIN code: exactly 6 digits
+    pin_hits = sum(1 for v in non_empty if re.match(r'^\d{6}$', v.strip()))
+    if pin_hits / n >= 0.5:
+        return 'PIN'
+
+    # MRN/UHID: alphanumeric with slashes/hyphens and hospital prefixes
+    mrn_hits = sum(1 for v in non_empty if re.match(
+        r'^(?:SNJ|JJH|UHID|DHH|ADM|IPD?|OPD|INS|CLM)[/\-]', v.strip(), re.I))
+    if mrn_hits / n >= 0.4:
+        return 'MRN'
+
+    # Date of birth: date-like values
+    date_hits = sum(1 for v in non_empty if re.match(
+        r'^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$|^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}$', v.strip()))
+    if date_hits / n >= 0.5:
+        return None  # Dates are not PII type per se; they're shifted, not removed
+
+    # Name columns: multi-word alphabetic strings, possibly with Devanagari
+    name_hits = sum(1 for v in non_empty
+                    if re.match(r'^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F\s.]+$', v)
+                    and len(v.split()) >= 2 and avg_digit_ratio < 0.1)
+    if name_hits / n >= 0.5:
+        # Check if they look like Indian names from our gazetteer
+        name_in_gaz = sum(1 for v in non_empty
+                          if any(p.lower() in COMMON_INDIAN_NAMES for p in v.split()
+                                 if p.lower() not in GENERIC_NAME_TOKENS))
+        if name_in_gaz / n >= 0.3:
+            return 'PATIENT_NAME'
+
+    return None
+
 # ---------------------------------------------------------------------------
 # Regex patterns for PII detection
 # ---------------------------------------------------------------------------
@@ -1274,7 +1347,7 @@ class PatientCluster:
 # ---------------------------------------------------------------------------
 # Evidence extraction
 # ---------------------------------------------------------------------------
-def extract_evidence_csv(row: list[str], headers: list[str]) -> dict[str, Any]:
+def extract_evidence_csv(row: list[str], headers: list[str], header_types: list[str | None] | None = None) -> dict[str, Any]:
     """Extract linkage evidence from a CSV row."""
     ev: dict[str, Any] = {}
     h_map = {normalize_text(h): i for i, h in enumerate(headers)}
@@ -1286,7 +1359,7 @@ def extract_evidence_csv(row: list[str], headers: list[str]) -> dict[str, Any]:
         if not val:
             continue
 
-        h_type = classify_header(headers[i])
+        h_type = header_types[i] if header_types and i < len(header_types) else classify_header(headers[i])
         if h_type == 'PATIENT_NAME':
             ev['patient_name'] = val
         elif h_type == 'RELATIVE_NAME':
@@ -1557,14 +1630,18 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
 
-    # Classify headers
-    header_types = [classify_header(h) for h in header]
+    # Classify headers with semantic value typing fallback (Technique 6)
+    header_types = []
+    for j, h in enumerate(header):
+        htype = classify_header(h)
+        if htype is None and body:
+            col_values = [r[j] for r in body if j < len(r)]
+            htype = infer_column_type_from_values(col_values)
+        header_types.append(htype)
 
     # Clean PII from header names (but keep structure)
     clean_header = []
     for h in header:
-        h_type = classify_header(h)
-        # Don't rename headers unless they contain actual PII values
         clean_header.append(h)
     w.writerow(clean_header)
 
@@ -1572,7 +1649,7 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
         record_id = f"{rel}:row:{i}"
 
         # Extract evidence for linkage
-        ev = extract_evidence_csv(row, header)
+        ev = extract_evidence_csv(row, header, header_types)
         linker.add_evidence(record_id, ev)
 
         # Derive a per-row patient key for date shifting (may be refined after linkage)

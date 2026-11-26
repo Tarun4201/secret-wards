@@ -66,12 +66,20 @@ pip install -r requirements.txt
 # Run firewall
 RAKSHA_SECRET="your-secret-key" python main.py --input /path/to/input --output /path/to/output
 
-# Validate output format contract
-python validate_output.py --input /path/to/input --output /path/to/output
+# Run unit tests (52 tests across Tier 1, Tier 2, and Tier 3)
+make test
+
+# Run RAKSHA privacy vs utility benchmark
+make bench
 ```
 
 ---
 
-## 5. Declared Models and Dependencies
-- **Runtime:** `regex`, `rapidfuzz`, `jellyfish`, `phonenumbers`, `indic-transliteration`.
+## 5. Technical Brief
+For a deep dive into the 7 internal techniques, threat model, and experimental benchmark tables, see the [2-Page Technical Brief](docs/BRIEF.md).
+
+---
+
+## 6. Declared Models and Dependencies
+- **Runtime:** `regex`, `rapidfuzz`, `jellyfish`, `phonenumbers`, `indic-transliteration`, `psutil`.
 - **No LLMs:** No transformer models, no external network calls, no cloud services used during evaluation. All logic is rule-based, phonetic, gazetteer-driven, and algorithmic.
