@@ -577,8 +577,11 @@ MEDICAL_TERMS = {
 DOCTOR_NAMES = set()  # Populated during processing
 
 HOSPITAL_NAMES = {
-    'sanjeevani', 'jeevan jyoti', 'jeevanjyoti', 'arogya', 'district hospital',
-    'hardoi', 'lucknow', 'multispeciality', 'charitable',
+    'hospital', 'multispeciality', 'superspeciality', 'charitable', 'sadan',
+    'clinic', 'polyclinic', 'dispensary', 'pathology', 'diagnostics',
+    'laboratory', 'medical', 'centre', 'center', 'institute', 'foundation',
+    'healthcare', 'nursing home', 'seva', 'district hospital',
+    'अस्पताल', 'चिकित्सालय', 'सदन', 'क्लिनिक',
 }
 
 # ---------------------------------------------------------------------------
@@ -630,7 +633,8 @@ MRN_HEADERS = {
     'uhid', 'mrn', 'patient id', 'patient_id', 'patientid', 'reg no', 'reg_no',
     'registration', 'registration no', 'ipd', 'ipd no', 'ipd_no', 'opd no',
     'opd_no', 'case no', 'case_no', 'hospital id', 'hospital_id',
-    'रजिस्ट्रेशन', 'पंजीकरण',
+    'mrn hosp code', 'mrn_hosp_code', 'uhid no', 'uhid_no', 'rogi id', 'rogi_id',
+    'रजिस्ट्रेशन', 'पंजीकरण', 'रोगी आईडी', 'मरीज़ आईडी', 'यूएचआईडी',
 }
 PIN_HEADERS = {
     'pin', 'pin code', 'pin_code', 'pincode', 'postal code', 'postal_code', 'zip',
@@ -648,7 +652,8 @@ INSURANCE_HEADERS = {
     'बीमा', 'पॉलिसी',
 }
 AGE_HEADERS = {
-    'age', 'umar', 'उम्र', 'आयु',
+    'age', 'umar', 'umr', 'age yrs', 'age years', 'age yrs val', 'umr saal',
+    'age sex', 'age gender', 'umar ling', 'उम्र', 'आयु', 'उम्र लिंग', 'आयु लिंग',
 }
 GENDER_HEADERS = {
     'gender', 'sex', 'ling', 'लिंग',
@@ -860,12 +865,14 @@ RE_EMAIL = re.compile(r'[\w.+\-]+@[\w\-]+\.[\w.]+')
 RE_MRN = re.compile(
     r'\b(?:SNJ[/-]\d{2}[/-]\d+|JJH[/-]\d+|UHID[/-]\d+|ADM\d+|DHH\d{4}-\d+|DHH[/-]IPD[/-][\d-]+|DHH[/-][\d-]+|'
     r'IP[/-]\d{2}[/-]\d+|IPD[/-]\d{4}[/-]\d+|OPD/\d{2}/\d{2}/\d+|'
+    r'(?!(?:PMJAY|POL)\b)[A-Z]{2,6}(?:[/-][A-Z0-9]{1,5}){1,3}[/-]\d{4,}|'
     r'INS[/-]\d+|CLM[/-]\d+)\b'
 )
 
 # Labelled UHID/MRN in free text: "UHID: DHH-IPD-2024-001"
 RE_MRN_LABELLED = re.compile(
     r'(?i)(?:uhid|mrn|patient\s*id|reg(?:istration)?\s*no?|ipd\s*no?|opd\s*no?|case\s*no?|hospital\s*id|'
+    r'यूएचआईडी|रोगी\s*(?:आईडी|सं\.?|संख्या)|मरीज़?\s*(?:आईडी|सं\.?|संख्या)|'
     r'पंजीकरण\s*(?:सं\.?|संख्या)?|आईपीडी\s*(?:सं\.?|संख्या)?|ओपीडी\s*(?:सं\.?|संख्या)?)\s*:?\s*([\w/\-]+)'
 )
 
@@ -1123,10 +1130,11 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     for m in RE_HOUSE.finditer(text):
         detections.append(Detection('HOUSE', m.group(0), (m.start(), m.end()), channel=channel))
 
-    # 9b. Village / locality patterns in free text
-    for m in re.finditer(r'(?i)\b(?:village|vill\.?|gaon|gram|गाँव|ग्राम)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]+)', text):
+    # 9b. Village / locality patterns in free text (require literal dot or separator so "Village/Mohalla" never matches "vill" + "age/Mohalla")
+    for m in re.finditer(r'(?i)\b(?:village|vill\.|gaon|gram|गाँव|ग्राम)(?:\s*:\s*|\s+)([A-Za-z\u0900-\u097F][^\n,;|]+)', text):
         v_name = m.group(1).strip()
-        if v_name and len(v_name) > 1:
+        v_low = normalize_text(v_name)
+        if v_name and len(v_name) > 1 and v_low not in ('mohalla', 'village', 'gram', 'gaon', 'मोहल्ला'):
             detections.append(Detection('VILLAGE', v_name, (m.start(1), m.start(1) + len(v_name)), channel=channel))
 
     for m in RE_PIN_INDIC.finditer(text):
@@ -1136,21 +1144,21 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     # Patient Name: label (handle "Patient Name: Priya Sharma", "Patient: Priya Sharma", "Naam: ...")
     for m in re.finditer(r'(?i)(?:patient\s+name|patient\s*:|rogi\s*(?:ka\s*)?naam|naam\s*:|नाम\s*:|रोगी\s*का\s*नाम|मरीज़?\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text):
         raw_val = m.group(1)
-        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b', raw_val)
+        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b|आयु|उम्र|लिंग', raw_val)
         name = split_m[0].strip()
         if name and len(name) > 1 and not re.match(r'^(?:presents|admitted|complaining|reported|referred|diagnosed|is|was)\b', name, re.IGNORECASE):
             if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
-                end_pos = m.start(1) + len(split_m[0])
+                end_pos = m.start(1) + len(split_m[0].rstrip())
                 detections.append(Detection('PATIENT_NAME', name, (m.start(1), end_pos), channel=channel, role='patient'))
 
     # Also catch bare "Name: Priya Sharma" patterns
     for m in re.finditer(r'(?i)^(?:name|full\s*name)\s*:\s*([^\n,;|]+)', text, re.MULTILINE):
         raw_val = m.group(1)
-        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b', raw_val)
+        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b|आयु|उम्र|लिंग', raw_val)
         name = split_m[0].strip()
         if name and len(name) > 1 and not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
             if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
-                end_pos = m.start(1) + len(split_m[0])
+                end_pos = m.start(1) + len(split_m[0].rstrip())
                 detections.append(Detection('PATIENT_NAME', name, (m.start(1), end_pos), channel=channel, role='patient'))
 
     # Patient before relation cue: "Asha, W/o Kamal" or "Zainab, W/o Salim"
@@ -1226,13 +1234,13 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
 
     # Relative names from relation cues in English & Hindi
     for m in re.finditer(
-        r'(?i)(?:\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?|अभिभावक|पुत्र|पत्नी)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n\)]|$)',
+        r'(?i)(?:\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)|(?:पिता|पति|माता|अभिभावक|सम्बन्धी|पुत्र|पत्नी)\s*(?:का\s*नाम)?)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n\)]|$)',
         text
     ):
         name = m.group(1).strip()
         if name and len(name) > 1:
             name = re.split(r'(?i)\s*(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin|गाँव|ग्राम|पता|[\),;\n\.])', name)[0].strip()
-            if name and normalize_text(name) not in DOCTOR_NAMES:
+            if name and normalize_text(name) not in DOCTOR_NAMES and normalize_text(name) not in ('का नाम', 'नाम', 'की', 'के'):
                 detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.start(1) + len(name)),
                                           channel=channel, role='relative'))
 
@@ -1259,12 +1267,14 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4) and normalize_text(name) not in DOCTOR_NAMES:
             detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
 
-    # Multi-word Latin names in text (e.g. Mohd. Shahid, Brajesh Yadav, Shanthi Chaudhary, Fatma Khatun) - horizontal whitespace only!
-    for m in re.finditer(r'\b([A-Z][a-zA-Z.]+(?:[ \t]+[A-Z][a-zA-Z.]+){1,2})\b', text):
+    # Multi-word Latin names in text - single-space separated only (never swallow column-tabbed Age/Sex!)
+    for m in re.finditer(r'\b([A-Z][a-zA-Z.]+(?: [A-Z][a-zA-Z.]+){1,2})\b', text):
         cand = m.group(1).strip()
         words = cand.split()
         norm_words = [normalize_text(w) for w in words]
         if any(w in MEDICAL_TERMS or w in DISEASE_EPONYMS or w in DOCTOR_NAMES or w in HOSPITAL_NAMES for w in norm_words):
+            continue
+        if norm_words and norm_words[0] in ('mohalla', 'ward', 'gram', 'village', 'house', 'makan', 'tehsil', 'distt', 'district', 'near', 'opp'):
             continue
         if any(re.search(rf'\b{re.escape(d)}\b', cand, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
             continue
@@ -1272,28 +1282,39 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
         if non_generic_names:
             start_pos = m.start(1)
             pre = text[max(0, start_pos - 15):start_pos].lower()
+            line_s = text.rfind('\n', 0, start_pos)
+            line_e = text.find('\n', m.end(1))
+            whole_line = text[(0 if line_s == -1 else line_s + 1):(len(text) if line_e == -1 else line_e)].lower()
             if any(dr in pre for dr in ('dr.', 'dr ', 'doctor', 'consultant', 'hospital', 'clinic')):
+                continue
+            if any(hn in whole_line.split() for hn in HOSPITAL_NAMES) and ':' not in whole_line:
                 continue
             if not any(d.type in ('PATIENT_NAME', 'RELATIVE_NAME') and m.start(1) >= d.span[0] and m.end(1) <= d.span[1] for d in detections):
                 detections.append(Detection('PATIENT_NAME', cand, (m.start(1), m.end(1)), confidence=0.75, channel=channel))
 
-    # Names in Devanagari (horizontal whitespace only, never cross lines!)
-    for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F \t]+)', text):
+    # Names in Devanagari (single-space separated only; never swallow column gaps or postpositions!)
+    for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F]*(?: [\u0900-\u097F][\u0900-\u097F\u0300-\u036F]*)+)', text):
         segment = m.group(1).strip()
+        seg_start, seg_end = m.start(), m.end()
+        # Trim trailing Hindi postpositions/labels cleanly so "को 6 दिन" stays intact
+        trim_m = re.match(r'^(.+?)(?: (?:को|का|की|के|ने|से|आयु|उम्र|लिंग))+$', segment)
+        if trim_m:
+            segment = trim_m.group(1).strip()
+            seg_end = seg_start + len(segment)
         words = segment.split()
         if len(words) >= 2:
             norm_seg = normalize_text(segment)
             # Skip if this segment is part of doctor names or clinical labels
             if any(dn in norm_seg for dn in DOCTOR_NAMES):
                 continue
-            if any(kw in segment for kw in ('दवा', 'शिकायत', 'अस्पताल', 'डॉक्टर', 'जाँच', 'दिनांक', 'तारीख', 'रोगी', 'पिता', 'माता', 'पति', 'उम्र', 'वर्ष')):
+            if any(kw in segment for kw in ('दवा', 'शिकायत', 'अस्पताल', 'चिकित्सालय', 'सदन', 'डॉक्टर', 'जाँच', 'दिनांक', 'तारीख', 'रोगी', 'पिता', 'माता', 'पति', 'उम्र', 'आयु', 'लिंग', 'वर्ष', 'यूएचआईडी', 'पंजीकरण')):
                 continue
             has_name = any(normalize_text(w) in COMMON_INDIAN_NAMES for w in words)
             if has_name:
                 is_medical = any(normalize_text(w) in MEDICAL_TERMS or normalize_text(w) in DISEASE_EPONYMS for w in words)
                 if not is_medical:
                     detections.append(Detection('PATIENT_NAME', segment,
-                                              (m.start(), m.end()), confidence=0.7, channel=channel))
+                                              (seg_start, seg_end), confidence=0.7, channel=channel))
 
     # Free-text Locality & Address patterns
     for m in re.finditer(r'(?i)\bWard\s+\d+\b', text):
@@ -1335,14 +1356,24 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
                 detections.append(Detection('PATIENT_NAME', cand, (m.start(), m.end()), channel=channel, role='patient'))
 
     for m in RE_PIN.finditer(text):
+        # Never match inside numeric reference ranges (e.g. 150000-410000) or hex UUIDs (e.g. 761938df-73c8-...)
+        pre_ch = text[m.start()-1] if m.start() > 0 else ''
+        post_ch = text[m.end()] if m.end() < len(text) else ''
+        if pre_ch.isalpha() or post_ch.isalpha():
+            continue
+        if re.match(r'^-\d', text[m.end():m.end()+2]) or re.search(r'\d-$', text[max(0, m.start()-2):m.start()]):
+            continue
         line_start = text.rfind('\n', 0, m.start())
         line_start = 0 if line_start == -1 else line_start + 1
         line_end = text.find('\n', m.end())
         line_end = len(text) if line_end == -1 else line_end
         line_txt = text[line_start:line_end].lower()
-        if any(kw in line_txt for kw in ('address', 'pin', 'pincode', 'dist', 'distt', 'tehsil', 'ward', 'mohalla', 'bareli', 'hardoi', 'lucknow', '-')):
-            if not is_dose_context(text, m.start(), m.end()):
-                detections.append(Detection('PIN', m.group(1), (m.start(1), m.end(1)), channel=channel))
+        if is_dose_context(text, m.start(), m.end()) or '/ul' in line_txt or 'platelet' in line_txt or 'reference' in line_txt:
+            continue
+        is_addr_pin = any(kw in line_txt for kw in ('address', 'pin', 'pincode', 'postal', 'zip', 'dist', 'distt', 'tehsil', 'ward', 'mohalla', 'gram', 'village', 'पता', 'पिन'))
+        has_city_dash = bool(re.search(r'[a-z\u0900-\u097f]\s*-\s*' + m.group(1) + r'\b', line_txt))
+        if is_addr_pin or has_city_dash:
+            detections.append(Detection('PIN', m.group(1), (m.start(1), m.end(1)), channel=channel))
 
     return detections
 
@@ -1446,12 +1477,22 @@ def make_replacement(det: Detection) -> str:
 # ---------------------------------------------------------------------------
 REMOVED_DIRECT_IDENTIFIERS: set[str] = set()
 
+_STOP_ID_TOKENS = GENERIC_NAME_TOKENS | {
+    'का', 'की', 'के', 'को', 'नाम', 'पता', 'गाँव', 'ग्राम', 'उम्र', 'आयु', 'लिंग',
+    'पिता', 'माता', 'पति', 'पुत्र', 'पत्नी', 'अभिभावक', 'सम्बन्धी', 'रोगी', 'मरीज़',
+}
+
+
 def record_removed_identifier(det: Detection):
     """Record a removed identifier so the sweep verifier can audit the output."""
     s = det.surface.strip()
     if len(s) < 3 or '[' in s or ']' in s or det.type in ('DOB', 'DATE', 'AGE', 'GENDER', 'PIN', 'HOUSE', 'LOCALITY', 'LANDMARK', 'VILLAGE'):
         return
     if re.search(r'\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b', s) or ('t' in s.lower() and ':' in s) or ('/' in s and ':' in s):
+        return
+    norm_s = normalize_text(s)
+    words_s = norm_s.split()
+    if words_s and all(w in _STOP_ID_TOKENS for w in words_s):
         return
     # Add exact surface
     REMOVED_DIRECT_IDENTIFIERS.add(s)
@@ -1461,7 +1502,7 @@ def record_removed_identifier(det: Detection):
         REMOVED_DIRECT_IDENTIFIERS.add(digits)
     # Name variants
     if det.type in ('PATIENT_NAME', 'RELATIVE_NAME'):
-        norm = normalize_text(s)
+        norm = norm_s
         if len(norm) >= 3 and norm not in GENERIC_NAME_TOKENS and norm not in MEDICAL_TERMS:
             REMOVED_DIRECT_IDENTIFIERS.add(norm)
             skel = name_skeleton(s)
@@ -1513,17 +1554,56 @@ def clean_text(text: str, channel: str = 'content') -> tuple[str, list[Detection
     return result, filtered
 
 
+def _band_age_sex_str(val: str) -> str | None:
+    """Band compound age/sex strings like '65/F', '49 Yrs/M', '65 Y / F' -> '65-69/F'."""
+    m = re.match(r'^(\d{1,3})([ \t]*(?:yrs?|yr|years?|y|वर्ष)?[ \t]*/[ \t]*(?:[MFmf]|male|female|महिला|पुरुष))$', val.strip(), re.I)
+    if m:
+        age_v = int(m.group(1))
+        if 0 <= age_v <= 125:
+            return f"{age_band(age_v)}{m.group(2)}"
+    return None
+
+
+def _is_date_key_name(h_norm: str) -> bool:
+    return any(
+        d in h_norm
+        for d in (
+            'date', 'birthdate', 'dob', 'admission', 'discharge', 'doj', 'dod',
+            'visit', 'collected', 'reported', 'registered', 'generated', 'lastupdated',
+            'created', 'effective', 'recorded', 'authored', 'issued', 'तारीख', 'दिनांक',
+        )
+    ) or h_norm in ('start', 'end') or h_norm.endswith('_on') or h_norm.endswith(' on')
+
+
+def _shift_json_dates_in_place(obj: Any, offset_days: int) -> None:
+    """Shift date/datetime strings inside a JSON dict/list without re-running PII detection."""
+    if isinstance(obj, dict):
+        for k, val in list(obj.items()):
+            h_norm = normalize_text(str(k))
+            if isinstance(val, str) and (_is_date_key_name(h_norm) or re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', val.strip())):
+                shifted = _try_shift_date_str(val, offset_days)
+                if shifted:
+                    obj[k] = shifted
+                    continue
+            _shift_json_dates_in_place(val, offset_days)
+    elif isinstance(obj, list):
+        for item in obj:
+            _shift_json_dates_in_place(item, offset_days)
+
+
 def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> tuple[Any, list[Detection]]:
     """Clean a JSON value recursively, applying date shifting and age banding."""
     all_dets: list[Detection] = []
     h_norm = normalize_text(header) if header else ''
+    h_clean = re.sub(r'[_\-./()]', ' ', h_norm).strip()
 
     # Numbers (integers / floats)
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         # Age banding
-        if h_norm in {'age', 'umar', 'उम्र', 'आयु', 'patient_age', 'dob_age'}:
-            Stats.generalized += 1
-            return age_band(int(v)), all_dets
+        if h_clean in {'age', 'umar', 'umr', 'उम्र', 'आयु', 'patient age', 'dob age', 'age yrs', 'age years', 'umr saal'}:
+            if 0 <= int(v) <= 125:
+                Stats.generalized += 1
+                return age_band(int(v)), all_dets
         # PIN code generalization
         if h_norm in ('pin', 'pincode', 'postal_code', 'postalcode', 'zip'):
             digits = str(int(v))
@@ -1551,8 +1631,19 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
             return '[MRN]', all_dets
         return v, all_dets
 
+    # Age & Age/Sex stored as string in JSON (e.g. "age_sex": "65/F")
+    if isinstance(v, str) and h_clean in {'age', 'umar', 'umr', 'उम्र', 'आयु', 'patient age', 'age yrs', 'age years', 'umr saal'}:
+        if v.strip().isdigit() and 0 <= int(v.strip()) <= 125:
+            Stats.generalized += 1
+            return age_band(int(v.strip())), all_dets
+    if isinstance(v, str) and h_clean in {'age sex', 'age gender', 'umar ling', 'उम्र लिंग', 'आयु लिंग'}:
+        banded = _band_age_sex_str(v)
+        if banded:
+            Stats.generalized += 1
+            return banded, all_dets
+
     # Location / PIN generalization in JSON
-    if h_norm in ('village', 'gaon', 'गाँव', 'gram'):
+    if h_clean in ('village', 'gaon', 'गाँव', 'gram', 'village mohalla', 'gram basti'):
         Stats.generalized += 1
         return '[VILLAGE]', all_dets
     if h_norm in ('pin', 'pincode', 'postal_code', 'postalcode', 'zip'):
@@ -1563,12 +1654,18 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
                 return digits[:3] + '***', all_dets
             return '[PIN]', all_dets
 
-    # Date shifting in JSON date fields
-    if shift and any(d in h_norm for d in ('date', 'birthdate', 'dob', 'admission', 'discharge', 'doj', 'dod', 'visit', 'तारीख', 'दिनांक')):
-        if isinstance(v, str):
-            shifted = _try_shift_date_str(v, shift)
-            if shifted:
-                return shifted, all_dets
+    # FHIR birthDate generalization (keep valid YYYY only, strips exact day/month)
+    if h_norm == 'birthdate' and isinstance(v, str):
+        m_by = re.match(r'^\s*(\d{4})-\d{2}-\d{2}', v)
+        if m_by:
+            Stats.generalized += 1
+            return m_by.group(1), all_dets
+
+    # Date shifting in JSON date fields (and unkeyed ISO-8601 timestamps)
+    if shift and isinstance(v, str) and (_is_date_key_name(h_norm) or re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', v.strip())):
+        shifted = _try_shift_date_str(v, shift)
+        if shifted:
+            return shifted, all_dets
 
     if isinstance(v, str):
         v_str = v.strip()
@@ -1607,20 +1704,7 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
                     all_dets.append(d)
                     return '[PATIENT_NAME]', all_dets
 
-        # Clean source_path or path-like strings in metadata
-        if (header and 'path' in header.lower()) or ('\\\\' in v_str) or ('/' in v_str):
-            parts = re.split(r'([_\-\\\/])', v_str)
-            new_parts = []
-            for p in parts:
-                if p.lower() in COMMON_INDIAN_NAMES and p.lower() not in GENERIC_NAME_TOKENS:
-                    new_parts.append('[NAME]')
-                elif re.match(r'^\d{6,}$', p):
-                    new_parts.append('[MRN]')
-                else:
-                    new_parts.append(p)
-            v = ''.join(new_parts)
-
-        # Check for base64 encoded text (e.g., in attachments)
+        # Check for base64 encoded text (e.g., in attachments) BEFORE path splitting
         if len(v_str) >= 24 and re.match(r'^[A-Za-z0-9+/]+={0,2}$', v_str):
             try:
                 dec = base64.b64decode(v_str).decode('utf-8', errors='ignore')
@@ -1635,19 +1719,35 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
             except Exception:
                 pass
 
+        # Run typed/pattern PII detection BEFORE path-segment splitting so unseen MRNs like NMC/26/H1/000005 redact cleanly as [MRN]
         dets = detect_pii_in_value(v, header)
         if dets:
             all_dets.extend(dets)
             for d in dets:
                 record_removed_identifier(d)
                 v = v.replace(d.surface, make_replacement(d))
+            return v, all_dets
+
+        # Clean source_path or path-like strings in metadata only when not already typed/redacted as MRN/date
+        if (header and 'path' in header.lower()) or ('\\\\' in v_str):
+            parts = re.split(r'([_\-\\\/])', v_str)
+            new_parts = []
+            for p in parts:
+                if p.lower() in COMMON_INDIAN_NAMES and p.lower() not in GENERIC_NAME_TOKENS:
+                    new_parts.append('[NAME]')
+                elif re.match(r'^\d{6,}$', p):
+                    new_parts.append('[MRN]')
+                else:
+                    new_parts.append(p)
+            v = ''.join(new_parts)
+
         return v, all_dets
 
     if isinstance(v, list):
         result = []
         for x in v:
             elem_shift = shift
-            if isinstance(x, dict):
+            if shift is not None and isinstance(x, dict):
                 x_ev = extract_evidence_json(x)
                 if any(x_ev.get(k) for k in ('uhid', 'aadhaar', 'abha', 'phone', 'email')):
                     x_key = (x_ev.get('uhid') or x_ev.get('aadhaar') or x_ev.get('abha') or
@@ -1667,19 +1767,18 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
 
         for k, x in v.items():
             new_k = k
-            # Clean PII from keys (e.g. "by_name": {"Jaspreet Singh": ...})
-            if any('\u0900' <= c <= '\u097F' for c in k) or any(w.lower() in COMMON_INDIAN_NAMES for w in k.split()):
-                key_dets = detect_pii_in_text(k, 'key')
-                if key_dets:
-                    for d in key_dets:
-                        new_k = new_k.replace(d.surface, make_replacement(d))
-                    all_dets.extend(key_dets)
-            elif len(k) > 25:
-                key_dets = detect_pii_in_text(k, 'key')
-                if key_dets:
-                    for d in key_dets:
-                        new_k = new_k.replace(d.surface, make_replacement(d))
-                    all_dets.extend(key_dets)
+            # Clean PII from ALL keys without collapsing colliding placeholders!
+            key_dets = detect_pii_in_text(k, 'key')
+            if key_dets:
+                for d in key_dets:
+                    record_removed_identifier(d)
+                    new_k = new_k.replace(d.surface, make_replacement(d))
+                all_dets.extend(key_dets)
+            if new_k != k and new_k in result:
+                idx_k = 1
+                while f"{new_k}_{idx_k}" in result:
+                    idx_k += 1
+                new_k = f"{new_k}_{idx_k}"
 
             elem_header = k
             if is_mother_ext or is_father_ext:
@@ -2548,7 +2647,18 @@ def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
                     ev.setdefault('pin', pin_d)
             elif h_type == 'DOB' or 'dob' in kl or 'birth' in kl:
                 ev.setdefault('dob', normalize_text(vs))
-            elif kl_clean == 'age sex' or kl_clean == 'sex':
+            elif kl_clean == 'age sex' or kl_clean == 'age gender':
+                m_as = re.match(r'^(\d{1,3})[ \t]*(?:yrs?|yr|years?|y)?[ \t]*/[ \t]*(M|F|male|female|महिला|पुरुष)$', normalize_text(vs), re.I)
+                if m_as:
+                    ev.setdefault('age', m_as.group(1))
+                    g = _normalize_gender(m_as.group(2))
+                    if g:
+                        ev.setdefault('gender', g)
+                else:
+                    g = _normalize_gender(vs)
+                    if g:
+                        ev.setdefault('gender', g)
+            elif kl_clean == 'sex':
                 g = _normalize_gender(vs)
                 if g:
                     ev.setdefault('gender', g)
@@ -2733,16 +2843,82 @@ _ORDINAL_SUFFIXES = {1: 'st', 2: 'nd', 3: 'rd', 21: 'st', 22: 'nd', 23: 'rd', 31
 def _get_ordinal(day: int) -> str:
     return _ORDINAL_SUFFIXES.get(day, 'th')
 
-def _try_shift_date_str(value: str, offset_days: int) -> str | None:
-    """Try to parse value as a date and return it shifted by offset_days. Returns None if not a date."""
+_DATE_FMTS_MDY = [
+    ('%m/%d/%Y', re.compile(r'^\d{1,2}/\d{1,2}/\d{4}$')),
+    ('%m-%d-%Y', re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$')),
+] + [x for x in _DATE_FMTS if x[0] not in ('%m/%d/%Y', '%m-%d-%Y')]
+
+
+def _is_csv_date_header(header: str) -> bool:
+    h_norm = normalize_text(header)
+    h_toks = set(re.sub(r'[_\-./()]', ' ', h_norm).split())
+    if any(k in h_norm for k in ('date', 'admission', 'discharge', 'doj', 'dod', 'visit', 'collected', 'reported', 'registered', 'तारीख', 'दिनांक')):
+        return True
+    return bool(h_toks & {'dt', 'adm', 'dis', 'admit', 'reg'})
+
+
+def _infer_col_prefer_mdy(header: str, values: list[str]) -> bool:
+    h_low = normalize_text(header)
+    if 'mm/dd' in h_low or 'mm-dd' in h_low:
+        return True
+    if 'dd/mm' in h_low or 'dd-mm' in h_low:
+        return False
+    for v in values:
+        m = re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](?:19|20)\d{2}$', v.translate(INDIC_DIGITS).strip())
+        if m:
+            p1, p2 = int(m.group(1)), int(m.group(2))
+            if p1 <= 12 and p2 > 12:
+                return True
+            if p1 > 12 and p2 <= 12:
+                return False
+    return False
+
+
+def _infer_text_prefer_mdy(text: str) -> bool:
+    t = text.translate(INDIC_DIGITS)
+    slash_pairs = re.findall(r'\b(\d{1,2})[/\-](\d{1,2})[/\-]((?:19|20)\d{2})\b', t)
+    for a, b, _ in slash_pairs:
+        p1, p2 = int(a), int(b)
+        if p1 <= 12 and p2 > 12:
+            return True
+        if p1 > 12 and p2 <= 12:
+            return False
+    # Check admission/discharge stay duration disambiguation when all slash dates have both numbers <= 12
+    adm_m = re.search(r'(?i)(?:date\s+of\s+admission|admission\s+date|admitted\s+on|भर्ती\s*की\s*तारीख)\s*:?\s*(\d{1,2})[/\-](\d{1,2})[/\-]((?:19|20)\d{2})', t)
+    dis_m = re.search(r'(?i)(?:date\s+of\s+discharge|discharge\s+date|discharged\s+on|छुट्टी\s*की\s*तारीख)\s*:?\s*(\d{1,2})[/\-](\d{1,2})[/\-]((?:19|20)\d{2})', t)
+    if adm_m and dis_m:
+        try:
+            a1, a2, ay = int(adm_m.group(1)), int(adm_m.group(2)), int(adm_m.group(3))
+            b1, b2, by = int(dis_m.group(1)), int(dis_m.group(2)), int(dis_m.group(3))
+            dmy_diff = (dt.date(by, b2, b1) - dt.date(ay, a2, a1)).days
+            mdy_diff = (dt.date(by, b1, b2) - dt.date(ay, a1, a2)).days
+            if dmy_diff > 60 and 0 <= mdy_diff <= 30:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def _try_shift_date_str(value: str, offset_days: int, prefer_mdy: bool = False) -> str | None:
+    """Try to parse value as a date/datetime and return it shifted by offset_days. Returns None if not a date."""
     v = value.strip()
     if not v:
         return None
 
     v_norm = v.translate(INDIC_DIGITS)
 
+    # 0. ISO-8601 datetime strings (e.g. 2026-08-30T16:15:00+05:30 or 2026-10-08T09:30:00Z)
+    m_iso_dt = re.match(r'^((?:19|20)\d{2}-\d{2}-\d{2})(T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)$', v_norm)
+    if m_iso_dt:
+        try:
+            d = dt.date.fromisoformat(m_iso_dt.group(1)) + dt.timedelta(days=offset_days)
+            return d.isoformat() + m_iso_dt.group(2)
+        except ValueError:
+            pass
+
     # 1. Standard numeric formats
-    for fmt, pattern in _DATE_FMTS:
+    fmts = _DATE_FMTS_MDY if prefer_mdy else _DATE_FMTS
+    for fmt, pattern in fmts:
         if pattern.match(v_norm):
             try:
                 d = dt.datetime.strptime(v_norm, fmt).date()
@@ -2841,7 +3017,8 @@ def _try_shift_date_str(value: str, offset_days: int) -> str | None:
 
 
 def process_csv(text: str, delimiter: str, rel: str, records: list,
-                linker: PatientCluster) -> str:
+                linker: PatientCluster, defer_date_shift: bool = False,
+                meta_out: dict | None = None) -> str:
     rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
     if not rows:
         return ""
@@ -2851,19 +3028,38 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
 
     # Classify headers with semantic value typing fallback (Technique 6)
     header_types = []
+    col_mdy = []
     for j, h in enumerate(header):
         htype = classify_header(h)
-        if htype is None and body:
-            col_values = [r[j] for r in body if j < len(r)]
+        col_values = [r[j] for r in body if j < len(r)] if body else []
+        if htype is None and col_values:
             htype = infer_column_type_from_values(col_values)
         header_types.append(htype)
+        col_mdy.append(_infer_col_prefer_mdy(h, col_values))
 
-    # Clean PII from header names (but keep structure)
+    # Clean PII from header names ONLY if not a recognized/safe schema header (prevents "Vill[VILLAGE]" and "का नाम" mangling)
     clean_header = []
-    for h in header:
-        cleaned_h, h_dets = clean_text(h, 'header')
-        clean_header.append(cleaned_h)
+    for j, h in enumerate(header):
+        h_norm = normalize_text(h)
+        h_clean = re.sub(r'[_\-./()]', ' ', h_norm).strip()
+        is_known_safe = (
+            header_types[j] is not None
+            or _is_csv_date_header(h)
+            or h_clean in {'age', 'umar', 'umr', 'age sex', 'age gender', 'age yrs', 'age years', 'gender', 'sex', 'ling', 'district', 'tehsil', 'state', 'relation', 'doctor', 'time', 'sample id', 'test', 'result', 'unit', 'ref range', 'reference range', 'loinc'}
+            or any(safe_k in h_clean for safe_k in ('doctor', 'diagnos', 'med', 'drug', 'prescription', 'aushadhi', 'vital', 'bp', 'reference', 'remark', 'note', 'status', 'amount', 'procedure', 'package', 'ward', 'department', 'sample'))
+        )
+        if is_known_safe:
+            clean_header.append(h)
+        else:
+            cleaned_h, _ = clean_text(h, 'header')
+            clean_header.append(cleaned_h)
     w.writerow(clean_header)
+
+    if meta_out is not None:
+        meta_out[f"sanitized/{rel}"] = {
+            "fmt": "csv", "delimiter": delimiter, "header": clean_header,
+            "header_types": header_types, "col_mdy": col_mdy,
+        }
 
     for i, row in enumerate(body):
         record_id = f"{rel}:row:{i}"
@@ -2872,13 +3068,14 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
         ev = extract_evidence_csv(row, header, header_types)
         linker.add_evidence(record_id, ev)
 
-        # Derive a per-row patient key for date shifting (may be refined after linkage)
-        # Use the strongest available ID; fallback to record_id
-        patient_key = (
-            ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
-            ev.get('phone') or ev.get('email') or record_id
-        )
-        shift = date_shift_days(patient_key)
+        # Derive a per-row patient key for date shifting (deferred to post-linkage when running full pipeline)
+        shift = None
+        if not defer_date_shift:
+            patient_key = (
+                ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+                ev.get('phone') or ev.get('email') or record_id
+            )
+            shift = date_shift_days(patient_key)
 
         # Clean each cell
         clean_row = []
@@ -2912,23 +3109,37 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
             else:
                 # Non-PII column: check for dates and age to transform
                 h_norm = normalize_text(h) if h else ''
+                h_clean = re.sub(r'[_\-./()]', ' ', h_norm).strip()
 
-                # Date columns: shift coherently
-                if h and any(d in h_norm for d in ('date', 'admission', 'discharge', 'doj', 'dod', 'visit', 'तारीख', 'दिनांक')):
-                    shifted = _try_shift_date_str(cell, shift)
-                    if shifted:
-                        clean_row.append(shifted)
+                # Date columns: shift coherently when shift is available
+                if h and _is_csv_date_header(h):
+                    if shift is not None:
+                        shifted = _try_shift_date_str(cell, shift, prefer_mdy=col_mdy[j])
+                        if shifted:
+                            clean_row.append(shifted)
+                            continue
+                    elif defer_date_shift and _try_shift_date_str(cell, 1, prefer_mdy=col_mdy[j]):
+                        clean_row.append(cell)
+                        continue
+
+                # Compound Age/Sex columns (e.g. "65/F" -> "65-69/F")
+                if h and h_clean in {'age sex', 'age gender', 'umar ling', 'उम्र लिंग', 'आयु लिंग'}:
+                    banded = _band_age_sex_str(cell)
+                    if banded:
+                        clean_row.append(banded)
+                        Stats.generalized += 1
                         continue
 
                 # Age columns: replace with band
-                if h and h_norm in {'age', 'umar', 'उम्र', 'आयु'}:
-                    age_m = re.search(r'\d+', cell)
+                if h and h_clean in {'age', 'umar', 'umr', 'age yrs', 'age years', 'age yrs val', 'umr saal', 'उम्र', 'आयु'}:
+                    age_m = re.search(r'\d+', cell.translate(INDIC_DIGITS))
                     if age_m:
                         try:
-                            band = age_band(int(age_m.group()))
-                            clean_row.append(band)
-                            Stats.generalized += 1
-                            continue
+                            age_v = int(age_m.group())
+                            if 0 <= age_v <= 125:
+                                clean_row.append(age_band(age_v))
+                                Stats.generalized += 1
+                                continue
                         except ValueError:
                             pass
 
@@ -2945,7 +3156,8 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
 
 
 def process_json(text: str, rel: str, records: list,
-                 linker: PatientCluster) -> str:
+                 linker: PatientCluster, defer_date_shift: bool = False,
+                 meta_out: dict | None = None) -> str:
     data = json.loads(text)
 
     # Determine if this is a FHIR Bundle, a single document, or a record collection
@@ -2974,12 +3186,13 @@ def process_json(text: str, rel: str, records: list,
         if isinstance(data, dict):
             ev = extract_evidence_json(data)
             linker.add_evidence(record_id, ev)
-            patient_key = (
-                ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
-                ev.get('phone') or ev.get('email') or record_id
-            )
-            doc_shift = date_shift_days(patient_key)
-        else:
+            if not defer_date_shift:
+                patient_key = (
+                    ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+                    ev.get('phone') or ev.get('email') or record_id
+                )
+                doc_shift = date_shift_days(patient_key)
+        elif not defer_date_shift:
             doc_shift = date_shift_days(record_id)
         records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": None})
         Stats.records += 1
@@ -2999,68 +3212,100 @@ def process_json(text: str, rel: str, records: list,
                     })
                     Stats.records += 1
 
-    # Clean the JSON data with coherent date shifting & age banding
-    cleaned, dets = clean_value(data, shift=doc_shift)
+    if meta_out is not None:
+        meta_out[f"sanitized/{rel}"] = {"fmt": "json", "is_doc": is_doc, "is_fhir": is_fhir}
+
+    # Clean the JSON data with coherent date shifting (deferred if running full pipeline) & age banding
+    cleaned, dets = clean_value(data, shift=(None if defer_date_shift else doc_shift))
     Stats.identifiers += len(dets)
 
     return json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n"
 
 
+def _shift_text_dates_and_ages(text: str, shift: int | None, prefer_mdy: bool = False, apply_age: bool = True) -> str:
+    """Band inline age patterns and/or coherently shift free-text dates."""
+    if apply_age:
+        def _replace_age_labelled(m):
+            prefix, age_str, suffix = m.group(1), m.group(2), m.group(3) or ''
+            try:
+                val = int(age_str.translate(INDIC_DIGITS))
+                if 0 <= val <= 125:
+                    Stats.generalized += 1
+                    return f"{prefix}{age_band(val)}{suffix}"
+            except ValueError:
+                pass
+            return m.group(0)
+
+        def _replace_age_slash(m):
+            age_str, rest = m.group(1), m.group(2)
+            try:
+                val = int(age_str.translate(INDIC_DIGITS))
+                if 0 <= val <= 125:
+                    Stats.generalized += 1
+                    return f"{age_band(val)}{rest}"
+            except ValueError:
+                pass
+            return m.group(0)
+
+        # Compound "Age/Sex: 49 Yrs/M" or "65 Y / F" or "53/F" (avoid BP like 120/80 since /M /F /महिला /पुरुष required!)
+        text = re.sub(
+            r'(?i)(?<!\d)(\d{1,3}|[०-९]{1,3})([ \t]*(?:yrs?|yr|years?|y|वर्ष)?[ \t]*/[ \t]*(?:M|F|Male|Female|महिला|पुरुष))\b',
+            _replace_age_slash,
+            text
+        )
+        # Explicit Age: 45 yrs (atomic digit match + negative lookahead against - ensures "Age: 45-49/M" never splits into "0-45-49/M")
+        text = re.sub(
+            r'(?i)\b((?:age(?:\s*/\s*sex)?|umar|उम्र|आयु)\s*[:=\-]?\s*)(\d{1,3}|[०-९]{1,3})(?![\d०-९\-])(\s*(?:yrs?|years?|साल|वर्ष)?)',
+            _replace_age_labelled,
+            text
+        )
+
+    if shift is not None:
+        def _shift_date_match(m):
+            raw_date = m.group(0)
+            shifted = _try_shift_date_str(raw_date, shift, prefer_mdy=prefer_mdy)
+            return shifted if shifted else raw_date
+
+        re_free_text_date = re.compile(
+            r'(?<![\w])(?:'
+            r'[\d०-९]{1,2}[/.\-][\d०-९]{1,2}[/.\-](?:19|20|१९|२०)?[\d०-९]{2}|'
+            r'(?:19|20)[\d]{2}[/.\-][\d]{1,2}[/.\-][\d]{1,2}(?:T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?|'
+            r'[\d०-९]{1,2}(?:st|nd|rd|th)?[\s\-]+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Sept|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|जनवरी|फ़रवरी|फरवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर)[\s\-]+(?:19|20|१९|२०)?[\d०-९]{2}|'
+            r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Sept|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(?:19|20)?\d{2}'
+            r')(?![\w])',
+            re.IGNORECASE
+        )
+        text = re_free_text_date.sub(_shift_date_match, text)
+
+    return text
+
+
 def process_text(text: str, rel: str, records: list,
-                 linker: PatientCluster) -> str:
+                 linker: PatientCluster, defer_date_shift: bool = False,
+                 meta_out: dict | None = None) -> str:
     record_id = f"{rel}:doc"
     ev = extract_evidence_text(text)
     linker.add_evidence(record_id, ev)
     records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": None})
     Stats.records += 1
 
-    patient_key = (
-        ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
-        ev.get('phone') or ev.get('email') or record_id
-    )
-    shift = date_shift_days(patient_key)
+    prefer_mdy = _infer_text_prefer_mdy(text)
+    if meta_out is not None:
+        meta_out[f"sanitized/{rel}"] = {"fmt": "txt", "prefer_mdy": prefer_mdy}
 
-    # 1. Band age in free text: e.g. "Age: 45 yrs", "Age: 45", "Age-45", "उम्र: 45"
-    def _replace_age(m):
-        prefix = m.group(1)
-        age_str = m.group(2)
-        suffix = m.group(3) or ''
-        try:
-            val = int(age_str)
-            Stats.generalized += 1
-            return f"{prefix}{age_band(val)}{suffix}"
-        except ValueError:
-            return m.group(0)
+    shift = None
+    if not defer_date_shift:
+        patient_key = (
+            ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+            ev.get('phone') or ev.get('email') or record_id
+        )
+        shift = date_shift_days(patient_key)
 
-    text = re.sub(
-        r'(?i)\b((?:age|umar|उम्र|आयु)\s*[:=\-]?\s*)(\d{1,3})(\s*(?:yrs|years|yr|साल|वर्ष)?)',
-        _replace_age,
-        text
-    )
-
-    # 2. Coherent date shifting in text (preserves stay length intervals)
-    def _shift_date_match(m):
-        raw_date = m.group(0)
-        shifted = _try_shift_date_str(raw_date, shift)
-        return shifted if shifted else raw_date
-
-    re_free_text_date = re.compile(
-        r'\b(?:'
-        r'\d{1,2}[/.\-]\d{1,2}[/.\-](?:19|20)?\d{2}|'
-        r'(?:19|20)\d{2}[/.\-]\d{1,2}[/.\-]\d{1,2}|'
-        r'\d{1,2}(?:st|nd|rd|th)?[\s\-]+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|जनवरी|फ़रवरी|फरवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर)[\s\-]+(?:19|20)?\d{2}|'
-        r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(?:19|20)?\d{2}'
-        r')\b',
-        re.IGNORECASE
-    )
-
-    text = re_free_text_date.sub(_shift_date_match, text)
-
-    # 3. Clean remaining PII from the text
+    # First strip PII (with clean boundaries so "Age/Sex: 49 Yrs/M" isn't eaten into "[PATIENT_NAME]/Sex: 49"),
+    # then band any remaining age phrases and shift dates (immediately unless deferred to post-linkage Phase 4)
     cleaned, dets = clean_text(text)
     Stats.identifiers += len(dets)
-
-    return cleaned
+    return _shift_text_dates_and_ages(cleaned, shift=shift, prefer_mdy=prefer_mdy, apply_age=True)
 
 
 def peak_rss_mb() -> float:
@@ -3106,12 +3351,28 @@ class PrivacyPlanner:
             qi_key = (raw_age_band, loc_qi)
             qi_profiles[qi_key].append(r)
 
-        # Check k-anonymity and widen age bands per file in a single pass
+        # Check k-anonymity and widen age bands & suppress rare PIN prefixes per file in a single pass
         files_to_widen: set[str] = set()
         for qi_key, recs in qi_profiles.items():
             if len(recs) < self.min_k:
                 for r in recs:
                     files_to_widen.add(r["file"].replace("sanitized/", "", 1))
+
+        def _widen_band(lo_s: str, hi_s: str) -> str | None:
+            lo, hi = int(lo_s), int(hi_s)
+            if hi - lo in (4, 5) and 0 <= lo <= 115:
+                lo_10 = (lo // 10) * 10
+                hi_10 = lo_10 + 9
+                Stats.generalized += 1
+                return f"{lo_10}-{hi_10}"
+            return None
+
+        re_bracket_band = re.compile(r'\[(\d{1,3})-(\d{1,3})\]')
+        # Bare 5-year age bands only in safe structural age contexts (never inside dates, BPs, or lab numbers)
+        re_bare_band = re.compile(
+            r'(?i)(^|[,;\t"\s:=])(\d{1,3})-(\d{1,3})(?=[,;\t"\s/\n]|$|(?:yrs?|yr|years?|y|वर्ष|साल)\b)'
+        )
+        re_pin_prefix = re.compile(r'(?<!\d)[1-9]\d{2}\*\*\*(?!\*)')
 
         for file_rel in files_to_widen:
             file_path = san_dir / file_rel
@@ -3119,15 +3380,23 @@ class PrivacyPlanner:
                 continue
             try:
                 content = file_path.read_text(encoding="utf-8")
-                # Replace 5-year band like [40-44] with 10-year [40-49]
-                def _widen(m):
-                    lo = int(m.group(1))
-                    lo_10 = (lo // 10) * 10
-                    hi_10 = lo_10 + 9
-                    Stats.generalized += 1
-                    return f"[{lo_10}-{hi_10}]"
 
-                new_content = re.sub(r'\[(\d{1,3})-(\d{1,3})\]', _widen, content)
+                def _widen_br(m):
+                    w = _widen_band(m.group(1), m.group(2))
+                    return f"[{w}]" if w else m.group(0)
+
+                def _widen_bare(m):
+                    lo, hi = int(m.group(2)), int(m.group(3))
+                    # Strict 5-year bucket invariant (lo % 5 == 0, span == 4) protects 0.6-1.2, ratios, dates
+                    if lo % 5 == 0 and hi == lo + 4 and 0 <= lo <= 115:
+                        w = _widen_band(m.group(2), m.group(3))
+                        if w:
+                            return f"{m.group(1)}{w}"
+                    return m.group(0)
+
+                new_content = re_bracket_band.sub(_widen_br, content)
+                new_content = re_bare_band.sub(_widen_bare, new_content)
+                new_content = re_pin_prefix.sub('[PIN]', new_content)
                 if new_content != content:
                     file_path.write_text(new_content, encoding="utf-8", newline="")
             except Exception:
@@ -3135,7 +3404,7 @@ class PrivacyPlanner:
 
 
 # ---------------------------------------------------------------------------
-# Sweep Verifier (Technique 5)
+# Sweep Verifier (Technique 5 - O(N) linear-time single-pass)
 # ---------------------------------------------------------------------------
 def _quarantine_file(entry: dict, file_path: Path, reason: str, quarantined_set: set):
     try:
@@ -3150,21 +3419,52 @@ def _quarantine_file(entry: dict, file_path: Path, reason: str, quarantined_set:
     entry["reason"] = reason
 
 
-def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[dict]) -> None:
-    """Sweep verifier: check all sanitized outputs for leaks before release."""
+_RE_SWEEP_WORD = re.compile(r'[a-z0-9\u0900-\u097f]+')
+_RE_SWEEP_IDTOK = re.compile(r'[a-z0-9][a-z0-9/\-]{3,}[a-z0-9]')
+_RE_SWEEP_DIGITS = re.compile(r'\d[\d\s\-]{5,}\d')
+
+
+def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[dict], t0: float | None = None, time_limit: float = 900.0) -> None:
+    """Sweep verifier: check all sanitized outputs for leaks before release in O(N) linear time."""
     if not POLICY.get("enable_sweep_verifier", True):
         return
     secret_str = SECRET.decode('utf-8', errors='ignore') if SECRET else ""
     safe_veto = (
         MEDICAL_TERMS | DISEASE_EPONYMS | DRUG_NAMES | GENERIC_NAME_TOKENS |
-        COMMON_INDIAN_NAMES | HOSPITAL_NAMES | DOCTOR_NAMES |
+        COMMON_INDIAN_NAMES | HOSPITAL_NAMES | DOCTOR_NAMES | _STOP_ID_TOKENS |
         {'[patient_name]', '[relative_name]', '[phone]', '[aadhaar]', '[mrn]', '[email]',
          '[village]', '[pin]', '[pan]', '[abha]', '[dob]', '[address]', '[house]',
          '[locality]', '[landmark]', '[insurance_id]', '[redacted]'}
     )
     hosp_words = {'hospital', 'clinic', 'charitable', 'sadan', 'dispensary', 'pathology', 'district', 'multispeciality', 'seva', 'ward'}
 
-    probe_values = set()
+    digit_probes: set[str] = set()
+    id_probes: set[str] = set()
+    phrase_by_first: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    single_word_probes: set[str] = set()
+
+    def _add_probe(pv: str) -> None:
+        if not pv or len(pv) < 4:
+            return
+        if pv.isdigit():
+            if len(pv) >= 6:
+                digit_probes.add(pv)
+            return
+        if any(c.isdigit() for c in pv):
+            id_probes.add(pv)
+            d_only = re.sub(r'\D', '', pv)
+            if len(d_only) >= 10:
+                digit_probes.add(d_only)
+        toks = _RE_SWEEP_WORD.findall(pv)
+        if not toks or all(tk in _STOP_ID_TOKENS for tk in toks):
+            return
+        if len(toks) == 1:
+            t = toks[0]
+            if len(t) >= 4 and t not in safe_veto:
+                single_word_probes.add(t)
+        else:
+            phrase_by_first[toks[0]].add(tuple(toks))
+
     for v in REMOVED_DIRECT_IDENTIFIERS:
         v_low = v.lower().strip()
         if len(v_low) < 4 or v_low in safe_veto or any(hw in v_low for hw in hosp_words):
@@ -3175,30 +3475,33 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
             continue
         if v_low in DOCTOR_NAMES or any(v_low.startswith(pfx) for pfx in ('dr.', 'dr ', 'doctor ', 'consultant', 'सर्जन', 'डॉ.', 'चिकित्सक')):
             continue
-        # Only probe for direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
+        # Probe direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
         if any(c.isdigit() for c in v_low) or len(v_low.split()) >= 2 or 'canary' in v_low:
-            probe_values.add(v_low)
-            # Technique 5: wider variant set (reverse name order, Devanagari transliteration, Indic digits)
+            _add_probe(v_low)
             parts = v_low.split()
             if len(parts) == 2:
-                probe_values.add(f"{parts[1]} {parts[0]}")
+                _add_probe(f"{parts[1]} {parts[0]}")
             if any('\u0900' <= c <= '\u097F' for c in v_low):
                 lat = rough_transliterate(v_low)
                 if lat and lat not in safe_veto and len(lat) >= 4:
-                    probe_values.add(lat)
+                    _add_probe(lat)
             if any(c.isdigit() for c in v_low):
-                indic_v = v_low.translate(str.maketrans('0123456789', '०१२३४५६७८९'))
-                probe_values.add(indic_v)
+                d_norm = re.sub(r'\D', '', v_low.translate(INDIC_DIGITS))
+                if len(d_norm) >= 10:
+                    digit_probes.add(d_norm)
 
     re_canary = re.compile(r'(?i)\b(?:[a-z0-9_-]*canary[a-z0-9_-]*)\b')
     re_aadhaar_raw = re.compile(r'(?<!\d)[2-9]\d{3}\s?\d{4}\s?\d{4}(?!\d)')
     re_phone_raw = re.compile(r'(?<!\d)(?:\+?91[\s\-]?)?[6-9]\d{9}(?!\d)')
+    re_uuid_hex = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-', re.I)
 
     quarantined_outputs: set[str] = set()
 
     for entry in files_report:
         if entry.get("status") != "sanitized" or not entry.get("output"):
             continue
+        if t0 is not None and (time.monotonic() - t0) > (time_limit - 15.0):
+            break
         rel = entry["output"].replace("sanitized/", "", 1)
         target_file = san_dir / rel
         if not target_file.exists():
@@ -3226,12 +3529,12 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
             _quarantine_file(entry, target_file, "canary_leak_detected", quarantined_outputs)
             continue
 
-        # Check raw numbers
-        content_lines = content.splitlines()
+        # Check raw phone and aadhaar numbers line by line (excluding doses and UUID hex blocks)
         leak_found = False
-        for line in content_lines:
+        reason = "identifier_leak_detected"
+        for line in content.splitlines():
             for m in re_phone_raw.finditer(line):
-                if not is_dose_context(line, m.start(), m.end()):
+                if not is_dose_context(line, m.start(), m.end()) and not re_uuid_hex.search(line[max(0, m.start() - 10):m.end() + 10]):
                     leak_found = True
                     break
             if leak_found:
@@ -3239,30 +3542,50 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
 
             for m in re_aadhaar_raw.finditer(line):
                 val = re.sub(r'\D', '', m.group(0))
-                if val in probe_values:
+                if val in digit_probes:
                     leak_found = True
                     break
             if leak_found:
                 break
 
         if leak_found:
-            _quarantine_file(entry, target_file, "identifier_leak_detected", quarantined_outputs)
+            _quarantine_file(entry, target_file, reason, quarantined_outputs)
             continue
 
-        # Check probe values (names, sensitive tokens)
+        # Fast O(N) normalized token, n-gram, digit-run, and ID-token checks
         content_norm = normalize_text(content)
-        for pv in probe_values:
-            if pv.isascii() and pv.isalpha():
-                if re.search(rf'\b{re.escape(pv)}\b', content_norm):
+        if digit_probes:
+            for dm in _RE_SWEEP_DIGITS.finditer(content_norm):
+                d_str = re.sub(r'\D', '', dm.group(0))
+                if d_str in digit_probes:
                     leak_found = True
                     break
-            elif re.search(r'^\d+$', pv):
-                if re.search(rf'(?<!\d){re.escape(pv)}(?!\d)', content):
+
+        if not leak_found and id_probes:
+            for im in _RE_SWEEP_IDTOK.finditer(content_norm):
+                if im.group(0) in id_probes:
                     leak_found = True
                     break
-            elif pv in content_norm:
-                leak_found = True
-                break
+
+        if not leak_found and (phrase_by_first or single_word_probes):
+            words = _RE_SWEEP_WORD.findall(content_norm)
+            n_words = len(words)
+            for idx, w in enumerate(words):
+                if single_word_probes and w in single_word_probes:
+                    if not (idx > 0 and words[idx - 1] in ('dr', 'doctor', 'consultant', 'डॉ')):
+                        leak_found = True
+                        break
+                cand_phrases = phrase_by_first.get(w)
+                if cand_phrases:
+                    if idx > 0 and words[idx - 1] in ('dr', 'doctor', 'consultant', 'डॉ'):
+                        continue
+                    for ph in cand_phrases:
+                        plen = len(ph)
+                        if idx + plen <= n_words and tuple(words[idx:idx + plen]) == ph:
+                            leak_found = True
+                            break
+                    if leak_found:
+                        break
 
         if leak_found:
             _quarantine_file(entry, target_file, "sweep_verifier_leak_detected", quarantined_outputs)
@@ -3285,6 +3608,7 @@ def main() -> int:
     san.mkdir(parents=True, exist_ok=True)
     files_report: list[dict] = []
     records: list[dict] = []
+    pending_meta: dict[str, dict] = {}
     linker = PatientCluster()
     sys.setrecursionlimit(5000)
 
@@ -3349,13 +3673,13 @@ def main() -> int:
             if has_pii_in_filename(rel):
                 out_rel = sanitize_filename(rel)
 
-            # Process by type
+            # Process by type (defer date shifting until Phase 4 so linked patient clusters get uniform shifts!)
             if ext in (".csv", ".tsv"):
-                result = process_csv(text, "\t" if ext == ".tsv" else ",", out_rel, records, linker)
+                result = process_csv(text, "\t" if ext == ".tsv" else ",", out_rel, records, linker, defer_date_shift=True, meta_out=pending_meta)
             elif ext == ".json":
-                result = process_json(text, out_rel, records, linker)
+                result = process_json(text, out_rel, records, linker, defer_date_shift=True, meta_out=pending_meta)
             else:
-                result = process_text(text, out_rel, records, linker)
+                result = process_text(text, out_rel, records, linker, defer_date_shift=True, meta_out=pending_meta)
 
             dest = san / out_rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -3378,8 +3702,6 @@ def main() -> int:
     for r in records:
         if r["file"] not in exported:
             continue
-        record_id = None
-        # Build record ID from file path and loc
         file_path = r["file"].replace("sanitized/", "", 1)
         record_id = f"{file_path}:{r['loc']}"
         pid = linker.get_pseudonym(record_id)
@@ -3388,52 +3710,90 @@ def main() -> int:
             Stats.linked += 1
         final_records.append(r)
 
-    # Phase 4: Insert pseudonyms into sanitized records (batched per file to eliminate redundant disk I/O)
+    # Phase 4: Unified post-linkage date shifting & logical-row pseudonym injection
     records_by_file: dict[str, list[dict]] = defaultdict(list)
     for r in final_records:
-        if r.get("patient"):
-            records_by_file[r["file"]].append(r)
+        records_by_file[r["file"]].append(r)
+
+    def _rec_shift(r_obj: dict) -> int:
+        fp = r_obj["file"].replace("sanitized/", "", 1)
+        rec_id = f"{fp}:{r_obj['loc']}"
+        ckey = linker.record_to_cluster.get(rec_id, rec_id)
+        return date_shift_days(ckey)
 
     for file_rel, file_recs in records_by_file.items():
         file_path = out / file_rel
         if not file_path.exists():
             continue
+        meta = pending_meta.get(file_rel, {})
+        fmt_kind = meta.get("fmt")
         try:
             content = file_path.read_text(encoding="utf-8")
             ext = file_path.suffix.lower()
 
             if ext in ('.csv', '.tsv'):
-                lines = content.split('\n')
-                for r in file_recs:
-                    loc = r["loc"]
-                    if loc.startswith("row:"):
-                        try:
-                            row_idx = int(loc.split(":")[1])
-                            line_idx = row_idx + 1  # 0-based data row after header
-                            if line_idx < len(lines) and lines[line_idx]:
-                                lines[line_idx] = lines[line_idx].replace('[MRN]', r["patient"], 1)
-                                if r["patient"] not in lines[line_idx]:
-                                    lines[line_idx] = lines[line_idx].replace('[PATIENT_NAME]', r["patient"], 1)
-                        except (ValueError, IndexError):
-                            pass
-                content = '\n'.join(lines)
+                delim = meta.get("delimiter", "\t" if ext == '.tsv' else ',')
+                rows = list(csv.reader(io.StringIO(content, newline=""), delimiter=delim))
+                if rows:
+                    hdr_row, body_rows = rows[0], rows[1:]
+                    htypes = meta.get("header_types") or [None] * len(hdr_row)
+                    col_mdy = meta.get("col_mdy") or [False] * len(hdr_row)
+                    rec_by_loc = {r["loc"]: r for r in file_recs}
+                    out_buf = io.StringIO()
+                    w = csv.writer(out_buf, delimiter=delim, lineterminator="\n")
+                    w.writerow(hdr_row)
+                    for i, row in enumerate(body_rows):
+                        rec = rec_by_loc.get(f"row:{i}")
+                        row_shift = _rec_shift(rec) if rec else date_shift_days(f"{file_rel}:row:{i}")
+                        # Shift date cells per logical row using unified cluster shift
+                        for j, cell in enumerate(row):
+                            if j < len(hdr_row) and (j >= len(htypes) or htypes[j] is None) and _is_csv_date_header(hdr_row[j]):
+                                shifted = _try_shift_date_str(cell, row_shift, prefer_mdy=(col_mdy[j] if j < len(col_mdy) else False))
+                                if shifted:
+                                    row[j] = shifted
+                        # Inject pseudonym cleanly into logical row (handles quoted multiline cells!)
+                        if rec and rec.get("patient"):
+                            psn = rec["patient"]
+                            injected = False
+                            for j, cell in enumerate(row):
+                                if '[MRN]' in cell:
+                                    row[j] = cell.replace('[MRN]', psn, 1)
+                                    injected = True
+                                    break
+                            if not injected:
+                                for j, cell in enumerate(row):
+                                    if '[PATIENT_NAME]' in cell:
+                                        row[j] = cell.replace('[PATIENT_NAME]', psn, 1)
+                                        injected = True
+                                        break
+                            if not injected:
+                                for j, cell in enumerate(row):
+                                    if j < len(htypes) and htypes[j] in ('MRN', 'PATIENT_NAME'):
+                                        row[j] = psn
+                                        injected = True
+                                        break
+                        w.writerow(row)
+                    content = out_buf.getvalue()
 
             elif ext == '.json':
                 try:
                     data = json.loads(content)
                     for r in file_recs:
+                        r_shift = _rec_shift(r)
+                        psn = r.get("patient")
                         if r["loc"] == "doc":
-                            if isinstance(data, dict):
+                            _shift_json_dates_in_place(data, r_shift)
+                            if psn and isinstance(data, dict):
                                 if data.get("resourceType") == "Bundle":
-                                    for entry in data.get("entry", []):
-                                        res = entry.get("resource", {})
+                                    for b_entry in data.get("entry", []):
+                                        res = b_entry.get("resource", {})
                                         if isinstance(res, dict):
                                             if res.get("resourceType") == "Patient":
-                                                res["id"] = r["patient"]
+                                                res["id"] = psn
                                             elif "subject" in res and isinstance(res["subject"], dict):
-                                                res["subject"]["reference"] = f"Patient/{r['patient']}"
+                                                res["subject"]["reference"] = f"Patient/{psn}"
                                 else:
-                                    data["patient_ref"] = r["patient"]
+                                    data["patient_ref"] = psn
                         else:
                             parts = r["loc"].strip("/").split("/")
                             current = data
@@ -3455,15 +3815,20 @@ def main() -> int:
                                 except (ValueError, IndexError):
                                     pass
                             if isinstance(current, dict):
-                                current["patient_ref"] = r["patient"]
+                                _shift_json_dates_in_place(current, r_shift)
+                                if psn:
+                                    current["patient_ref"] = psn
                     content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
                 except (json.JSONDecodeError, KeyError, TypeError):
                     pass
 
             elif ext == '.txt':
-                for r in file_recs:
-                    if r["patient"] not in content:
-                        content = f"Patient: {r['patient']}\n{content}"
+                doc_rec = file_recs[0] if file_recs else None
+                doc_shift = _rec_shift(doc_rec) if doc_rec else date_shift_days(f"{file_rel}:doc")
+                prefer_mdy = bool(meta.get("prefer_mdy", False))
+                content = _shift_text_dates_and_ages(content, shift=doc_shift, prefer_mdy=prefer_mdy, apply_age=False)
+                if doc_rec and doc_rec.get("patient") and doc_rec["patient"] not in content:
+                    content = f"Patient: {doc_rec['patient']}\n{content}"
 
             file_path.write_text(content, encoding="utf-8", newline="")
         except (OSError, UnicodeError):
@@ -3474,7 +3839,7 @@ def main() -> int:
     planner.plan_and_generalize(san, final_records, linker.evidence)
 
     # Phase 5: Sweep Verifier (Technique 5)
-    run_sweep_verifier(san, files_report, final_records)
+    run_sweep_verifier(san, files_report, final_records, t0=t0, time_limit=time_limit)
 
     # Write records.jsonl
     with open(out / "records.jsonl", "w", encoding="utf-8") as f:

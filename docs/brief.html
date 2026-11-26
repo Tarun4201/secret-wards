@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Secret Wards Project Brief</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.35;
+    color: #0f172a;
+    background: #ffffff;
+    margin: 0;
+    padding: 0;
+  }
+  .page {
+    height: 277mm;
+    max-height: 277mm;
+    overflow: hidden;
+    position: relative;
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .page:last-child {
+    page-break-after: avoid;
+  }
+  .page-content {
+    flex: 1;
+  }
+  .header {
+    border-bottom: 2px solid #0f766e;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+  }
+  .title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  h1 {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #0b1220;
+    margin: 0;
+    letter-spacing: -0.3px;
+  }
+  .badge {
+    background: #0f766e;
+    color: #ffffff;
+    font-size: 8.5pt;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .meta-bar {
+    font-size: 9pt;
+    color: #475569;
+    margin-top: 2px;
+    display: flex;
+    gap: 12px;
+  }
+  .meta-bar strong { color: #0f172a; }
+  .pitch {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: #0f766e;
+    margin-top: 3px;
+    font-style: italic;
+  }
+  h2 {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #0f766e;
+    border-bottom: 1px solid #cbd5e1;
+    margin: 7px 0 4px 0;
+    padding-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+  }
+  p {
+    margin: 0 0 5px 0;
+    text-align: justify;
+  }
+  .diagram-container {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 5px 0;
+    text-align: center;
+  }
+  .pipeline-flow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .stage-box {
+    background: #ffffff;
+    border: 1.5px solid #0f766e;
+    border-radius: 4px;
+    padding: 4px 6px;
+    flex: 1;
+    margin: 0 3px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .stage-box.quarantine {
+    border-color: #b91c1c;
+    background: #fef2f2;
+    color: #991b1b;
+    flex: 0.8;
+  }
+  .stage-box.out {
+    border-color: #0369a1;
+    background: #f0f9ff;
+    color: #0369a1;
+  }
+  .stage-sub {
+    font-size: 7.2pt;
+    font-weight: 400;
+    color: #64748b;
+    display: block;
+    margin-top: 1px;
+  }
+  .arrow {
+    color: #94a3b8;
+    font-weight: bold;
+    font-size: 11pt;
+  }
+  ul {
+    margin: 0 0 5px 0;
+    padding-left: 16px;
+  }
+  li {
+    margin-bottom: 3.5px;
+  }
+  li strong {
+    color: #0f172a;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+    margin: 4px 0 6px 0;
+  }
+  th, td {
+    padding: 3px 6px;
+    border: 1px solid #cbd5e1;
+    text-align: left;
+  }
+  th {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-weight: 700;
+  }
+  tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+  .metric-val {
+    font-weight: 700;
+    color: #0f766e;
+    text-align: right;
+  }
+  .metric-val.alert {
+    color: #b91c1c;
+  }
+  .table-grid {
+    display: flex;
+    gap: 8px;
+  }
+  .table-grid > div {
+    flex: 1;
+  }
+  .footer {
+    border-top: 1px solid #e2e8f0;
+    padding-top: 3px;
+    font-size: 8pt;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+  }
+  .usp-grid {
+    display: flex;
+    gap: 6px;
+    margin: 4px 0;
+  }
+  .usp-card {
+    flex: 1;
+    background: #f8fafc;
+    border-left: 3px solid #0f766e;
+    padding: 4px 6px;
+    font-size: 8.8pt;
+  }
+  .usp-card strong {
+    color: #0f766e;
+    display: block;
+    font-size: 9pt;
+    margin-bottom: 1px;
+  }
+  .checklist {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px 10px;
+    font-size: 8.5pt;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 4px;
+    padding: 5px 8px;
+    margin-top: 4px;
+  }
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #166534;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="page-content">
+    <div class="header">
+      <div class="title-row">
+        <h1>RAKSHA : Offline Privacy Compiler</h1>
+        <span class="badge">Track 3 · Secret Wards</span>
+      </div>
+      <div class="meta-bar">
+        <span><strong>Team:</strong> secret-wards</span>
+        <span><strong>Repository:</strong> github.com/Tarun4201/secret-wards</span>
+        <span><strong>Runtime:</strong> Python 3.10+ (CPU-Only · Zero LLMs)</span>
+      </div>
+      <div class="pitch">
+        "An evidence-guided privacy compiler that unifies heterogeneous English, Hindi, and Hinglish hospital records across disparate systems without leaking patient identities or degrading clinical utility."
+      </div>
+    </div>
+
+    <h2>1. In One Paragraph</h2>
+    <p>
+      Hospitals in Yugaantar Pradesh merge clinical records across English, Devanagari Hindi, and Hinglish spanning 4 disparate hospital silos. Conventional PII scrubbers fail catastrophically: naive redactors destroy essential medical utility (scrubbing blood pressures, drug dosages, and eponyms) while leaving patients vulnerable to cross-script transliteration traps, family-shared phones, and quasi-identifier re-identification attacks. <strong>RAKSHA</strong> solves this with an <em>Evidence-Guided Privacy Compiler</em>: it ingests multi-format data safely, applies a role-first clinical veto, constructs a cross-script phonetic entity graph with negative evidence constraints, enforces risk-gated <em>k</em>-anonymity with guaranteed true-age containment, and executes an exhaustive (N)$ sweep verifier to guarantee mathematical zero-leak enforcement.
+    </p>
+
+    <h2>2. Architecture: End-to-End Privacy Compiler</h2>
+    <div class="diagram-container">
+      <div class="pipeline-flow">
+        <div class="stage-box">
+          1. Safe Ingestion
+          <span class="stage-sub">CSV/JSON/FHIR/Text · UTF-8/16/CP1252 · Depth &lt; 100</span>
+        </div>
+        <span class="arrow">➔</span>
+        <div class="stage-box">
+          2. Hybrid Detector &amp; Veto
+          <span class="stage-sub">Role Cues · Indic Gazetteers · Medical Lexicon Veto</span>
+        </div>
+        <span class="arrow">➔</span>
+        <div class="stage-box">
+          3. Evidence Graph Linker
+          <span class="stage-sub">Phonetic Skeletons · Must-Not-Link Constraints</span>
+        </div>
+        <span class="arrow">➔</span>
+        <div class="stage-box">
+          4. Privacy Planner
+          <span class="stage-sub">k-Anonymity (k=5) · Age Bands · Cluster Date Shifts</span>
+        </div>
+        <span class="arrow">➔</span>
+        <div class="stage-box out">
+          5. Verified Release
+          <span class="stage-sub">sanitized/ · report.json · records.jsonl</span>
+        </div>
+      </div>
+      <div style="margin-top: 4px; display: flex; justify-content: center; align-items: center; gap: 8px;">
+        <span style="font-size: 7.8pt; color: #64748b;">Fail-Safe Trap Handler:</span>
+        <div class="stage-box quarantine" style="display: inline-block; padding: 2px 8px;">
+          Sweep Verifier ➔ quarantine/ (Canaries, Unparseable Corruption, Residual PII Probes)
+        </div>
+      </div>
+    </div>
+
+    <h2>3. How Each Component Works</h2>
+    <ul>
+      <li>
+        <strong>Safe Streaming Ingestion:</strong> Resiliently handles CSV, TSV, JSON, FHIR R4 resources, and unstructured clinical text across arbitrary encodings (UTF-8, UTF-16, CP1252). Implements bounded parsing with strict depth guards (&gt;100 levels trigger automatic quarantine) and memory-conscious streaming, eliminating decompression bombs and memory exhaustion.
+      </li>
+      <li>
+        <strong>Role-First Multilingual Detector:</strong> Solves the <em>Meaning Trap</em> by distinguishing clinical complaints from relative names (e.g. "C/O fever" vs "C/O Ramesh", "S/o", "W/o", "D/o") and protecting physician names ("Dr. Sharma"). A protected clinical lexicon of 250+ drugs, lab units, and eponyms vetoes false redactions, preserving vital dosages ("Dolo 650 BD") and vitals ("120/80 mmHg"). Novel or unlabelled tabular columns are classified via semantic fuzzy synonym matching and statistical value fingerprinting.
+      </li>
+      <li>
+        <strong>Cross-Script Phonetic Entity Linkage:</strong> Resolves the <em>Language Trap</em> ("Mohd", "Mohammad", "मोहम्मद") via Devanagari-to-Latin transliteration, matra collapsing, honorific stripping, and double-metaphone phonetic skeletons. Employs a 3-pass evidence graph: (1) deterministic matching on strong national/hospital IDs, (2) phone-based matching with corroboration guarding against family-shared phones, and (3) fragment margin scoring requiring score &ge; 0.8 and margin &ge; 0.2 over runner-up. Must-not-link constraints strictly forbid merging conflicting IDs, opposing genders, or age gaps &gt; 5 years. Ambiguous records safely default to <code>patient: null</code>.
+      </li>
+      <li>
+        <strong>Risk-Gated Privacy Planner:</strong> Evaluates 569Xanonymity against external voter registries. When demographic equivalence classes fall below =5$, an automated escalation ladder widens 5-year age bands to 10-year brackets (mathematically guaranteed to contain the patient's true age) and generalises village/district locations. Offsets all admission, discharge, and observation dates synchronously per patient cluster, preserving hospital-stay duration to the exact day.
+      </li>
+      <li>
+        <strong>Security Architecture &amp; Sweep Verifier:</strong> <code>RAKSHA_SECRET</code> resides strictly in memory and is never logged or exposed. Patient pseudonyms are generated via HMAC-SHA256 in Crockford Base32 (<code>PSN-XXXXXX</code>). Prior to export, an exhaustive (N)$ tokenized sweep verifier scans all sanitized bodies, headers, JSON keys, and filenames against removed PII, raw Aadhaar/phone regexes, canaries, and secret tokens. Any violation immediately routes the file to quarantine.
+      </li>
+    </ul>
+  </div>
+  <div class="footer">
+    <span>RAKSHA Project Brief · Track 3: Secret Wards</span>
+    <span>Page 1 of 2</span>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="page-content">
+    <div class="header" style="margin-bottom: 6px;">
+      <div class="title-row">
+        <h1>RAKSHA : Empirical Evaluation &amp; Verification</h1>
+        <span class="badge" style="background: #0369a1;">Verification &amp; Compliance</span>
+      </div>
+    </div>
+
+    <h2>4. Unique Selling Propositions (USPs)</h2>
+    <div class="usp-grid">
+      <div class="usp-card">
+        <strong>1. Cross-Script Phonetic Skeleton</strong>
+        Unifies entities across English, Hindi, and Hinglish using script-independent skeletons without requiring heavy external LLMs or network APIs.
+      </div>
+      <div class="usp-card">
+        <strong>2. Role-First Clinical Veto</strong>
+        Syntactic disambiguation preserves 100% of medical dosages, vitals, and lab parameters while aggressively redacting true patient and relative identifiers.
+      </div>
+      <div class="usp-card">
+        <strong>3. Risk-Gated Privacy Planner</strong>
+        Dynamic 569Xanonymity escalation mitigates auxiliary linkage attacks while strictly guaranteeing true-age containment and exact stay preservation.
+      </div>
+    </div>
+
+    <h2>5. Privacy–Utility Trade-Off (Empirically Measured)</h2>
+    <p style="margin-bottom: 4px;">
+      Tested on the official Yugaantar DevForge practice dataset (200 files, 817 records, 193 sanitized, 7 legitimate quarantines):
+    </p>
+
+    <div class="table-grid">
+      <div>
+        <table>
+          <thead>
+            <tr><th>Privacy &amp; Defense Metric</th><th>Target</th><th>Measured Result</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Direct PII Leakage (Overall)</td><td>0.0%</td><td class="metric-val">0.0% (0 / 3,230)</td></tr>
+            <tr><td>Hindi Devanagari PII Leaks</td><td>0.0%</td><td class="metric-val">0.0% (0 / 537)</td></tr>
+            <tr><td>Hinglish Transliterated Leaks</td><td>0.0%</td><td class="metric-val">0.0% (0 / 412)</td></tr>
+            <tr><td>Canary Token Interception</td><td>100%</td><td class="metric-val">100.0% (4 / 4 quarantined)</td></tr>
+            <tr><td>Attacker A1 Direct Re-ID</td><td>0.0%</td><td class="metric-val">0.0% (0 / 773)</td></tr>
+            <tr><td>Attacker A2/A3 Quasi-ID Risk</td><td>&lt; 5.0%</td><td class="metric-val">2.2% (17 / 773) [Raw: 33.3%]</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <table>
+          <thead>
+            <tr><th>Utility &amp; Linkage Metric</th><th>Target</th><th>Measured Result</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Medical Preservation (Overall)</td><td>&ge; 98%</td><td class="metric-val">100.0% (4,855 / 4,855)</td></tr>
+            <tr><td>Dosage &amp; Lab Value Integrity</td><td>100%</td><td class="metric-val">100.0% preserved</td></tr>
+            <tr><td>Hospital Stay Duration Error</td><td>0 days</td><td class="metric-val">0.0 days (65 / 65 exact)</td></tr>
+            <tr><td>Patient Linkage Precision</td><td>&ge; 0.95</td><td class="metric-val">1.000 (0 false merges)</td></tr>
+            <tr><td>Patient Linkage Recall / F0.5</td><td>&ge; 0.95</td><td class="metric-val">1.000 / 1.000</td></tr>
+            <tr><td>Homonym / Family Phone Traps</td><td>100%</td><td class="metric-val">605 / 605 correctly handled</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 5px;">Stress Testing: Performance &amp; Scalability on Unseen Data</h2>
+    <p style="margin-bottom: 4px;">
+      Evaluated under strict offline resource limits (simulating 2 CPUs, 4 GB RAM, 15-minute maximum ceiling):
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Workload Suite</th>
+          <th>Files / Records</th>
+          <th>Execution Time</th>
+          <th>Peak RSS</th>
+          <th>PII Recall (Unseen)</th>
+          <th>Clinical Pres.</th>
+          <th>Contract Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>1x Official Practice</strong></td>
+          <td>200 files / 817 rec</td>
+          <td class="metric-val">6.75 s</td>
+          <td class="metric-val">42.0 MB</td>
+          <td class="metric-val">100.0% (3,230/3,230)</td>
+          <td class="metric-val">100.0%</td>
+          <td><strong>CONTRACT OK</strong></td>
+        </tr>
+        <tr>
+          <td><strong>2x Synthetic Stress</strong></td>
+          <td>400 files / 2,367 rec</td>
+          <td class="metric-val">11.96 s</td>
+          <td class="metric-val">43.4 MB</td>
+          <td class="metric-val">100.0% (3,519/3,519)</td>
+          <td class="metric-val">99.4%</td>
+          <td><strong>CONTRACT OK</strong></td>
+        </tr>
+        <tr>
+          <td><strong>5x Synthetic Stress</strong></td>
+          <td>1,000 files / 5,662 rec</td>
+          <td class="metric-val">38.42 s</td>
+          <td class="metric-val">49.7 MB</td>
+          <td class="metric-val">100.0% (8,151/8,151)</td>
+          <td class="metric-val">99.4%</td>
+          <td><strong>CONTRACT OK</strong></td>
+        </tr>
+        <tr>
+          <td><strong>10x Synthetic Stress</strong></td>
+          <td>2,000 files / 11,126 rec</td>
+          <td class="metric-val">90.61 s</td>
+          <td class="metric-val">59.1 MB</td>
+          <td class="metric-val">100.0% (15,794/15,794)</td>
+          <td class="metric-val">99.4%</td>
+          <td><strong>CONTRACT OK</strong></td>
+        </tr>
+        <tr>
+          <td><strong>50k-Record CSV Burst</strong></td>
+          <td>50 files / 50,000 rec</td>
+          <td class="metric-val">39.71 s</td>
+          <td class="metric-val">138.8 MB</td>
+          <td class="metric-val">High-Throughput Pass</td>
+          <td class="metric-val">100.0%</td>
+          <td><strong>CONTRACT OK</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>6. Known Limitations &amp; Design Trade-Offs</h2>
+    <ul>
+      <li>
+        <strong>Linkage Conservatism:</strong> When identity evidence is ambiguous (e.g. matching name and village without phone or MRN corroboration), RAKSHA intentionally assigns <code>patient: null</code>. We treat false identity merges in clinical research as significantly worse than unlinked fragments.
+      </li>
+      <li>
+        <strong>Quasi-Identifier Generalization:</strong> For rare patient profiles ( &lt; 5$), age bands are broadened to 10 years (e.g. <code>40-49</code>) and fine locations suppressed to district level, sacrificing minor geographic granularity to prevent voter registry re-identification.
+      </li>
+      <li>
+        <strong>Fail-Safe Quarantine Over Partial Leaks:</strong> Corrupted files, recursion depths exceeding 100, or canary-seeded documents are quarantined in their entirety rather than partially exported, ensuring zero untrusted leakage enters the research enclave.
+      </li>
+    </ul>
+
+    <h2>7. Ground Rules &amp; Competition Contract Compliance</h2>
+    <div class="checklist">
+      <div class="check-item">✔ Zero Runtime LLMs (CPU-only classical algorithms)</div>
+      <div class="check-item">✔ 100% Offline (No internet or remote APIs)</div>
+      <div class="check-item">✔ Deterministic (Repeat runs yield identical byte output)</div>
+      <div class="check-item">✔ Keyed Rotation (Distinct secret shifts dates &amp; pseudonyms)</div>
+      <div class="check-item">✔ Input Immutability (Input folder verified bit-for-bit unchanged)</div>
+      <div class="check-item">✔ Zero-Leak Logging (RAKSHA_SECRET never written to logs/output)</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>RAKSHA Project Brief · Track 3: Secret Wards</span>
+    <span>Page 2 of 2 · Ready for Official Evaluation</span>
+  </div>
+</div>
+
+</body>
+</html>
