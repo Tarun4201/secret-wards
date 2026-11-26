@@ -1455,8 +1455,45 @@ def extract_evidence_text(text: str) -> dict[str, Any]:
 
 
 def extract_evidence_json(data: dict, path: str = '') -> dict[str, Any]:
-    """Extract linkage evidence from a JSON record."""
+    """Extract linkage evidence from a JSON record or FHIR Bundle."""
     ev: dict[str, Any] = {}
+    if not isinstance(data, dict):
+        return ev
+
+    # Special handling for FHIR R4 Bundle
+    if data.get("resourceType") == "Bundle":
+        for entry in data.get("entry", []):
+            res = entry.get("resource", {})
+            if isinstance(res, dict) and res.get("resourceType") == "Patient":
+                for name_obj in res.get("name", []):
+                    given = " ".join(name_obj.get("given", []))
+                    family = name_obj.get("family", "")
+                    full = f"{given} {family}".strip()
+                    if full:
+                        ev.setdefault("patient_name", full)
+                for telecom in res.get("telecom", []):
+                    sys_val = telecom.get("system")
+                    val = telecom.get("value")
+                    if val:
+                        if sys_val == "phone":
+                            ev.setdefault("phone", re.sub(r'[\s\-+]', '', val))
+                        elif sys_val == "email":
+                            ev.setdefault("email", val)
+                for ident in res.get("identifier", []):
+                    val = ident.get("value")
+                    if val:
+                        ev.setdefault("uhid", val)
+                if res.get("birthDate"):
+                    ev.setdefault("dob", res["birthDate"])
+                if res.get("gender"):
+                    ev.setdefault("gender", res["gender"][:1].upper())
+                for addr in res.get("address", []):
+                    if addr.get("city"):
+                        ev.setdefault("village", addr["city"])
+                    if addr.get("postalCode"):
+                        ev.setdefault("pin", addr["postalCode"])
+        return ev
+
     if isinstance(data, dict):
         for k, v in data.items():
             kl = normalize_text(k)
@@ -1926,6 +1963,17 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
         # Only probe for direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
         if any(c.isdigit() for c in v_low) or len(v_low.split()) >= 2 or 'canary' in v_low:
             probe_values.add(v_low)
+            # Technique 5: wider variant set (reverse name order, Devanagari transliteration, Indic digits)
+            parts = v_low.split()
+            if len(parts) == 2:
+                probe_values.add(f"{parts[1]} {parts[0]}")
+            if any('\u0900' <= c <= '\u097F' for c in v_low):
+                lat = rough_transliterate(v_low)
+                if lat and lat not in safe_veto and len(lat) >= 4:
+                    probe_values.add(lat)
+            if any(c.isdigit() for c in v_low):
+                indic_v = v_low.translate(str.maketrans('0123456789', '०१२३४५६७८९'))
+                probe_values.add(indic_v)
 
     re_canary = re.compile(r'(?i)\b(?:canary[-_][a-z0-9_-]+)\b')
     re_aadhaar_raw = re.compile(r'(?<!\d)[2-9]\d{3}\s?\d{4}\s?\d{4}(?!\d)')
@@ -2150,7 +2198,17 @@ def main() -> int:
                             data = json.loads(content)
                             if r["loc"] == "doc":
                                 if isinstance(data, dict):
-                                    data["patient_ref"] = r["patient"]
+                                    if data.get("resourceType") == "Bundle":
+                                        # FHIR Bundle: insert pseudonym into Patient resource and update references
+                                        for entry in data.get("entry", []):
+                                            res = entry.get("resource", {})
+                                            if isinstance(res, dict):
+                                                if res.get("resourceType") == "Patient":
+                                                    res["id"] = r["patient"]
+                                                elif "subject" in res and isinstance(res["subject"], dict):
+                                                    res["subject"]["reference"] = f"Patient/{r['patient']}"
+                                    else:
+                                        data["patient_ref"] = r["patient"]
                             else:
                                 # Navigate to the record and insert
                                 parts = r["loc"].strip("/").split("/")

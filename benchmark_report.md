@@ -4,7 +4,7 @@
 | :--- | :---: | :---: | :---: | :---: |
 | Raw (Unchanged Copy) | 1 | 33.3% | 100.0% | <0.01s |
 | Aggressive / Naive Baseline | 0 | 0.0% | 0.0% | <0.01s |
-| **RAKSHA Compiler (Our Pipeline)** | 0 | 0.0% | 100.0% | 0.239s |
+| **RAKSHA Compiler (Our Pipeline)** | 0 | 0.0% | 100.0% | 0.213s |
 
 ### Key Findings & USP Proof:
 1. **Zero Direct Leaks:** RAKSHA achieves 0 direct identifier leaks across text, CSV, and JSON channels.
