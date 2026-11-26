@@ -543,7 +543,7 @@ make test
 
 ## Team
 
-**Team:** secret-wards  
+**Team:** Phantom Troupe 
 **Track:** 3 — Secret Wards  
 **Event:** Yugaantar DevForge Hackathon  
 **Repository:** https://github.com/Tarun4201/secret-wards
