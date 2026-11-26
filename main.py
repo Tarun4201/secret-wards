@@ -359,6 +359,7 @@ NAME_HEADERS = {
     'name', 'patient name', 'patient_name', 'patientname', "patient's name",
     'naam', 'rogi ka naam', 'rogi naam', 'marij ka naam', 'full name', 'fullname',
     'first name', 'first_name', 'firstname', 'last name', 'last_name', 'lastname',
+    'first', 'last', 'local', 'local name', 'local_name', 'fname', 'lname',
     'given', 'family', 'surname', 'पूरा नाम', 'नाम', 'रोगी का नाम', 'मरीज़ का नाम',
 }
 RELATIVE_HEADERS = {
@@ -384,15 +385,17 @@ ABHA_HEADERS = {
 }
 ADDRESS_HEADERS = {
     'address', 'addr', 'full address', 'full_address', 'pata', 'pura pata',
-    'resident', 'residence', 'पता', 'पूरा पता', 'निवास',
+    'resident', 'residence', 'line', 'address line', 'address_line', 'addr_line', 'street',
+    'पता', 'पूरा पता', 'निवास',
 }
 VILLAGE_HEADERS = {
-    'village', 'village/mohalla', 'gaon', 'gram', 'mohalla', 'tola', 'basti',
-    'गाँव', 'ग्राम', 'मोहल्ला', 'टोला', 'बस्ती',
+    'village', 'village/mohalla', 'village mohalla', 'village_mohalla', 'gaon', 'gram', 'mohalla', 'tola', 'basti',
+    'city', 'shahar', 'गाँव', 'ग्राम', 'मोहल्ला', 'टोला', 'बस्ती', 'शहर',
 }
 DOB_HEADERS = {
     'dob', 'date of birth', 'date_of_birth', 'dateofbirth', 'birth date',
     'birth_date', 'birthdate', 'janm tithi', 'janm_tithi', 'जन्म तिथि',
+    'dob mm dd yyyy', 'dob dd mm yyyy', 'dob yyyy mm dd',
 }
 MRN_HEADERS = {
     'uhid', 'mrn', 'patient id', 'patient_id', 'patientid', 'reg no', 'reg_no',
@@ -412,7 +415,8 @@ PAN_HEADERS = {
 }
 INSURANCE_HEADERS = {
     'insurance', 'insurance id', 'insurance_id', 'policy', 'policy no', 'policy_no',
-    'claim', 'claim no', 'claim_no', 'बीमा', 'पॉलिसी',
+    'claim', 'claim no', 'claim_no', 'pmjay', 'pmjay id', 'pmjay_id', 'pmjay no', 'pmjay_no',
+    'बीमा', 'पॉलिसी',
 }
 AGE_HEADERS = {
     'age', 'umar', 'उम्र', 'आयु',
@@ -463,6 +467,10 @@ def classify_header(header: str) -> str | None:
             return None
 
     # 2. PII exact match: check RELATIVE_HEADERS before NAME_HEADERS
+    if any(h.startswith(pfx) for pfx in ('dob', 'date of birth', 'birth date', 'जन्म तिथि')):
+        return 'DOB'
+    if 'pmjay' in h:
+        return 'INSURANCE_ID'
     if h in RELATIVE_HEADERS:
         return 'RELATIVE_NAME'
     for header_set, pii_type in PII_HEADER_MAP.items():
@@ -588,10 +596,16 @@ def infer_column_type_from_values(values: list[str]) -> str | None:
 RE_PHONE = re.compile(
     r'(?<!\d)(?:\+?91[\s\-]?)?(?:0[\s\-]?)?([6-9]\d{4}[\s\-]?\d{5})(?!\d)'
 )
+RE_PHONE_INDIC = re.compile(
+    r'(?<![०-९])(?:\+?९१[\s\-]?)?(?:०[\s\-]?)?([६-९][०-९]{4}[\s\-]?[०-९]{5})(?![०-९])'
+)
 
 # Aadhaar: 12 digits (possibly with spaces/hyphens), not starting with 0 or 1
 RE_AADHAAR = re.compile(
     r'(?<!\d)([2-9]\d{3}[\s\-]?\d{4}[\s\-]?\d{4})(?!\d)'
+)
+RE_AADHAAR_INDIC = re.compile(
+    r'(?<![०-९])([२-९][०-९]{3}[\s\-]?[०-९]{4}[\s\-]?[०-९]{4})(?![०-९])'
 )
 
 # Masked Aadhaar: XXXX XXXX 1234
@@ -612,14 +626,15 @@ RE_EMAIL = re.compile(r'[\w.+\-]+@[\w\-]+\.[\w.]+')
 
 # MRN/UHID patterns from the hospitals — also catch labelled UHID: patterns in free text
 RE_MRN = re.compile(
-    r'\b(?:SNJ/\d{2}/\d+|JJH[/-]\d+|UHID[/-]\d+|ADM\d+|DHH[/-]IPD[/-][\d-]+|'
+    r'\b(?:SNJ[/-]\d{2}[/-]\d+|JJH[/-]\d+|UHID[/-]\d+|ADM\d+|DHH\d{4}-\d+|DHH[/-]IPD[/-][\d-]+|DHH[/-][\d-]+|'
     r'IP[/-]\d{2}[/-]\d+|IPD[/-]\d{4}[/-]\d+|OPD/\d{2}/\d{2}/\d+|'
     r'INS[/-]\d+|CLM[/-]\d+)\b'
 )
 
 # Labelled UHID/MRN in free text: "UHID: DHH-IPD-2024-001"
 RE_MRN_LABELLED = re.compile(
-    r'(?i)(?:uhid|mrn|patient\s*id|reg(?:istration)?\s*no?|ipd\s*no?|opd\s*no?|case\s*no?|hospital\s*id)\s*:?\s*([\w/\-]+)'
+    r'(?i)(?:uhid|mrn|patient\s*id|reg(?:istration)?\s*no?|ipd\s*no?|opd\s*no?|case\s*no?|hospital\s*id|'
+    r'पंजीकरण\s*(?:सं\.?|संख्या)?|आईपीडी\s*(?:सं\.?|संख्या)?|ओपीडी\s*(?:सं\.?|संख्या)?)\s*:?\s*([\w/\-]+)'
 )
 
 # Date patterns (various Indian formats)
@@ -632,9 +647,10 @@ RE_DATE_ISO = re.compile(
 
 # Indian PIN code
 RE_PIN = re.compile(r'(?<!\d)([1-9]\d{5})(?!\d)')
+RE_PIN_INDIC = re.compile(r'(?<![०-९])([१-९][०-९]{5})(?![०-९])')
 
 # Insurance ID pattern
-RE_INSURANCE = re.compile(r'\b(INS[/-]\d+|CLM[/-]\d+)\b', re.IGNORECASE)
+RE_INSURANCE = re.compile(r'\b(INS[/-]\d+|CLM[/-]\d+|PMJAY[/-][A-Z0-9/-]+|POL[/-]\d+[/-]\d+)\b', re.IGNORECASE)
 
 # House number pattern
 RE_HOUSE = re.compile(
@@ -688,18 +704,18 @@ COMMON_INDIAN_NAMES = {
     'mohammad', 'mohd', 'shahid', 'ahmed', 'ali', 'imran', 'akram',
     'naseem', 'yusuf', 'javed', 'zubair', 'arif', 'saleem', 'khalid',
     'jaspreet', 'sukhwinder', 'kuldeep', 'harjeet', 'brijesh',
-    'hareesh', 'jagdish', 'prakash', 'baban',
+    'hareesh', 'harish', 'harpreet', 'jagdish', 'prakash', 'baban',
     # Female first names
     'sunita', 'anita', 'kavita', 'savita', 'mamta', 'neeta', 'reeta',
     'geeta', 'seema', 'meena', 'neha', 'pooja', 'priya', 'rekha', 'usha',
-    'kamla', 'kamala', 'shanti', 'parvati', 'lakshmi', 'saraswati',
-    'fatima', 'fatma', 'farida', 'shabana', 'salma', 'zainab', 'amina',
-    'reena', 'meera',
+    'kamla', 'kamala', 'shanti', 'shanthi', 'parvati', 'parvathi', 'lakshmi', 'saraswati',
+    'fatima', 'fatma', 'farida', 'shabana', 'salma', 'zainab', 'zenab', 'amina',
+    'reena', 'meera', 'asha', 'sarita', 'pushpa', 'swati', 'poonam', 'ayesha', 'saroj', 'rukhsana',
     # Surnames
     'kumar', 'sharma', 'verma', 'gupta', 'singh', 'chauhan', 'chaudhary',
     'yadav', 'pandey', 'pandeya', 'tiwari', 'mishra', 'thakur', 'lodhi',
     'paswan', 'nishad', 'ansari', 'qureshi', 'siddiqui', 'baig', 'bano',
-    'kaur', 'devi',
+    'kaur', 'devi', 'rajput', 'khatoon', 'khatun', 'malik', 'khan',
     # Pan-Indian regional surnames and first names
     'patil', 'deshmukh', 'kulkarni', 'joshi', 'shinde', 'gaikwad', 'jadhav',
     'chavan', 'patel', 'shah', 'mehta', 'desai', 'modi', 'bhatt', 'parikh',
@@ -708,6 +724,7 @@ COMMON_INDIAN_NAMES = {
     'banerjee', 'bhattacharya', 'ghosh', 'bose', 'dutta', 'dasgupta', 'sen', 'roy',
     'venkatesh', 'subramanian', 'krishnamurthy', 'ramanathan', 'karthik',
     'srinivasan', 'raghavan', 'anand', 'vishnu', 'balaji', 'sourav', 'subhash',
+    'brajesh', 'sukhvinder', 'irfan',
     # Devanagari names
     'कमला', 'किशन', 'रमेश', 'सुरेश', 'मोहन', 'सुनीता', 'गीता', 'मीरा',
     'रीना', 'पार्वती', 'फ़ातिमा', 'शबाना', 'सलमा', 'ज़ैनब', 'उषा',
@@ -717,6 +734,7 @@ COMMON_INDIAN_NAMES = {
     'शाहिद', 'मोहम्मद', 'अहमद', 'ज़ुबैर', 'आरिफ़', 'नसीम', 'यूसुफ़',
     'जावेद', 'अकरम', 'कौर', 'सिंह', 'कुमार', 'शर्मा', 'वर्मा', 'गुप्ता',
     'बानो', 'बैग', 'पटेल', 'शाह', 'जोशी', 'पाटिल', 'देशमुख', 'कुलकर्णी', 'रेड्डी', 'राव', 'घोष',
+    'आशा', 'राजपूत', 'खातून', 'मलिक', 'खान', 'सरिता', 'पुष्पा', 'हरीश',
 }
 
 # Generic tokens that shouldn't trigger name detection alone
@@ -810,16 +828,23 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     detections = []
 
     # 1. Phone numbers (but not doses)
-    # Also catch labelled patterns: "Phone: 9988776655", "Mob: ..."
+    # Also catch labelled patterns: "Phone: 9988776655", "Mob: ...", "मोबाइल: ७८८८०२३९२३"
     for m in re.finditer(r'(?i)(?:phone|mob(?:ile)?|contact|tel(?:ephone)?|whatsapp)\s*(?:no\.?|number|#)?\s*:?\s*(\+?91[\s\-]?)?([6-9]\d{4}[\s\-]?\d{5})', text):
         raw = m.group(0)
         if not is_dose_context(text, m.start(), m.end()):
             detections.append(Detection('PHONE', raw, (m.start(), m.end()), channel=channel))
+    for m in re.finditer(r'(?i)(?:मोबाइल|फ़ोन|फोन)\s*(?:सं\.?|नंबर)?\s*:?\s*([०-९\s\-]{10,12})', text):
+        raw = m.group(1).strip()
+        indic_digits = re.sub(r'[^०-९]', '', raw)
+        if len(indic_digits) >= 10:
+            detections.append(Detection('PHONE', raw, (m.start(1), m.end(1)), channel=channel))
     for m in RE_PHONE.finditer(text):
         raw = m.group(0)
         digits = re.sub(r'\D', '', raw)
         if len(digits) >= 10 and not is_dose_context(text, m.start(), m.end()):
             detections.append(Detection('PHONE', raw, (m.start(), m.end()), channel=channel))
+    for m in RE_PHONE_INDIC.finditer(text):
+        detections.append(Detection('PHONE', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 2. Aadhaar (12 digits, not in dose context)
     for m in RE_AADHAAR.finditer(text):
@@ -829,6 +854,8 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
             # Check it's not an ABHA number
             if not RE_ABHA.match(text[max(0,m.start()-3):m.end()+3]):
                 detections.append(Detection('AADHAAR', raw, (m.start(), m.end()), channel=channel))
+    for m in RE_AADHAAR_INDIC.finditer(text):
+        detections.append(Detection('AADHAAR', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 3. Masked Aadhaar
     for m in RE_AADHAAR_MASKED.finditer(text):
@@ -858,43 +885,93 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
 
     # 8. Insurance IDs
     for m in RE_INSURANCE.finditer(text):
-        if m.group(0).upper().startswith('INS') or m.group(0).upper().startswith('CLM'):
-            detections.append(Detection('INSURANCE_ID', m.group(0), (m.start(), m.end()), channel=channel))
+        detections.append(Detection('INSURANCE_ID', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 9. House numbers
     for m in RE_HOUSE.finditer(text):
         detections.append(Detection('HOUSE', m.group(0), (m.start(), m.end()), channel=channel))
 
     # 9b. Village / locality patterns in free text
-    for m in re.finditer(r'(?i)(?:\b(?:village|vill\.?|gaon)\b|गाँव|ग्राम)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]+)', text):
+    for m in re.finditer(r'(?i)\b(?:village|vill\.?|gaon|gram|गाँव|ग्राम)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]+)', text):
         v_name = m.group(1).strip()
         if v_name and len(v_name) > 1:
             detections.append(Detection('VILLAGE', v_name, (m.start(1), m.start(1) + len(v_name)), channel=channel))
 
+    for m in RE_PIN_INDIC.finditer(text):
+        detections.append(Detection('PIN', m.group(0), (m.start(), m.end()), channel=channel))
+
     # 10. Names - detect using anchored patterns and gazetteer
     # Patient Name: label (handle "Patient Name: Priya Sharma", "Patient: Priya Sharma", "Naam: ...")
     for m in re.finditer(r'(?i)(?:patient\s+name|patient\s*:|rogi\s*(?:ka\s*)?naam|naam\s*:|नाम\s*:|रोगी\s*का\s*नाम|मरीज़?\s*(?:का\s*)?नाम)\s*:?\s*([^\n,;|]+)', text):
-        name = m.group(1).strip()
+        raw_val = m.group(1)
+        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b', raw_val)
+        name = split_m[0].strip()
         if name and len(name) > 1 and not re.match(r'^(?:presents|admitted|complaining|reported|referred|diagnosed|is|was)\b', name, re.IGNORECASE):
             if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
-                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel, role='patient'))
+                end_pos = m.start(1) + len(split_m[0])
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), end_pos), channel=channel, role='patient'))
 
     # Also catch bare "Name: Priya Sharma" patterns
     for m in re.finditer(r'(?i)^(?:name|full\s*name)\s*:\s*([^\n,;|]+)', text, re.MULTILINE):
-        name = m.group(1).strip()
+        raw_val = m.group(1)
+        split_m = re.split(r'(?i)\s{2,}|\t|\b(?:age|sex|dob|uhid|mrn|ipd|opd|ward|bed|umar)\b', raw_val)
+        name = split_m[0].strip()
         if name and len(name) > 1 and not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
-            # Only add if not already captured
             if not any(d.type == 'PATIENT_NAME' and d.surface == name for d in detections):
-                detections.append(Detection('PATIENT_NAME', name, (m.start(1), m.end(1)), channel=channel, role='patient'))
+                end_pos = m.start(1) + len(split_m[0])
+                detections.append(Detection('PATIENT_NAME', name, (m.start(1), end_pos), channel=channel, role='patient'))
 
-    # Honorific patient mentions in free text: "Arif sahab ka BP...", "Ramesh ji", "Sunita didi"
-    for m in re.finditer(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,})\s+(?:sahab|sahib|ji|didi|bhaiya|babu|साहब|जी|दीदी|भैया|बाबू)\b', text):
+    # Patient before relation cue: "Asha, W/o Kamal" or "Zainab, W/o Salim"
+    for m in re.finditer(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]+(?:\s+[A-Z\u0900-\u097F][a-z\u0900-\u097F]+)?)\s*,\s*(?:[sSwWdD]/[oO]|son\s+of|wife\s+of|daughter\s+of)', text):
+        pname = m.group(1).strip()
+        pnorm = normalize_text(pname)
+        if pnorm not in DOCTOR_NAMES and pnorm not in MEDICAL_TERMS:
+            detections.append(Detection('PATIENT_NAME', pname, (m.start(1), m.end(1)), channel=channel, role='patient'))
+
+    # WhatsApp sender: [11/09/26, 8:13 pm] Ajay Bhaiya: <attachment...>
+    for m in re.finditer(r'\[\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4},\s*[^\]]+\]\s*([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)*)\s*:', text):
+        sender = m.group(1).strip()
+        if sender and normalize_text(sender) not in DOCTOR_NAMES:
+            detections.append(Detection('RELATIVE_NAME', sender, (m.start(1), m.end(1)), channel=channel, role='relative'))
+
+    # WhatsApp Report of: Report of Reena behenji  65 Y / F
+    for m in re.finditer(r'(?i)\b(?:report\s+of|patient\s+report\s+for)\s+([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)*?)(?=\s+\d{1,3}\s*[Yy]|\s*[,;|\n]|$)', text):
+        pname = m.group(1).strip()
+        if pname and normalize_text(pname) not in DOCTOR_NAMES and normalize_text(pname) not in MEDICAL_TERMS:
+            detections.append(Detection('PATIENT_NAME', pname, (m.start(1), m.start(1) + len(pname)), channel=channel, role='patient'))
+
+    # Sample received from <Name>'s attendant
+    for m in re.finditer(r'(?i)\b(?:sample\s+received\s+from|received\s+from)\s+([A-Z\u0900-\u097F][a-z\u0900-\u097F]+)(?:\'s)?(?:\s+attendant)?', text):
+        pname = m.group(1).strip()
+        if pname and normalize_text(pname) not in DOCTOR_NAMES and normalize_text(pname) not in MEDICAL_TERMS:
+            detections.append(Detection('PATIENT_NAME', pname, (m.start(1), m.start(1) + len(pname)), channel=channel, role='patient'))
+
+    # Honorific patient mentions in free text: "Arif sahab ka BP...", "Ramesh ji", "Sunita didi", "Mahesh bhai"
+    for m in re.finditer(
+        r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,})\s+(?:sahab|sahib|ji|didi|bhaiya|babu|bhai|behen|behenji|amma|chachu|chacha|mama|mamaji|tauji|fufa|fufaji|mausa|mausi|bhabhi|kaka|kakaji|साहब|जी|दीदी|भैया|बाबू|भाई|बहन|बहनजी|अम्मा|चाचू|चाचा|मामा|मामाजी|ताऊजी|फूफा|मौसी|भाभी|काका)\b',
+        text
+    ):
         h_name = m.group(0).strip()
         f_name = m.group(1).strip()
-        if normalize_text(f_name) not in DOCTOR_NAMES and normalize_text(h_name) not in DOCTOR_NAMES:
-            if not any(d in f_name.lower() for d in DRUG_NAMES) and normalize_text(f_name) not in MEDICAL_TERMS:
+        f_norm = normalize_text(f_name)
+        if f_norm not in DOCTOR_NAMES and normalize_text(h_name) not in DOCTOR_NAMES:
+            if not any(re.search(rf'\b{re.escape(d)}\b', f_name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4) and f_norm not in MEDICAL_TERMS:
                 if not any(d.type in ('PATIENT_NAME', 'RELATIVE_NAME') and m.start() >= d.span[0] and m.end() <= d.span[1] for d in detections):
-                    detections.append(Detection('PATIENT_NAME', h_name, (m.start(), m.end()), channel=channel, role='patient'))
+                    role = 'relative' if any(k in h_name.lower() for k in ('chachu', 'chacha', 'mama', 'mamaji', 'tauji', 'fufa', 'fufaji', 'mausa', 'mausi', 'bhabhi', 'चाचू', 'चाचा', 'मामा', 'मामाजी')) else 'patient'
+                    det_type = 'RELATIVE_NAME' if role == 'relative' else 'PATIENT_NAME'
+                    detections.append(Detection(det_type, h_name, (m.start(), m.end()), channel=channel, role=role))
+
+    # Free text DOB
+    for m in re.finditer(r'(?i)\b(?:dob|date\s+of\s+birth|birth\s*date|जन्म\s*तिथि)\s*[:=\-]?\s*(\d{1,2}[/.\-]\d{1,2}[/.\-](?:19|20)?\d{2})\b', text):
+        detections.append(Detection('DOB', m.group(1), (m.start(1), m.end(1)), channel=channel))
+
+    # Hinglish possessive patient mentions & Hindi complaint cues: "Dinesh ka BP", "Fatima ka sugar", "Asha ki report", "हरीश पांडे को 8 दिन से बुखार"
+    for m in re.finditer(r'(?i)\b([A-Z\u0900-\u097F][a-z\u0900-\u097F]{2,}(?:[ \t]+[A-Z\u0900-\u097F][a-z\u0900-\u097F]+)?)\s+(?:ka|ki|ke|ko|का|की|के|को)\b', text):
+        f_name = m.group(1).strip()
+        f_norm = normalize_text(f_name)
+        if any(w in COMMON_INDIAN_NAMES for w in f_norm.split()) and f_norm not in DOCTOR_NAMES and f_norm not in MEDICAL_TERMS:
+            if not any(d.type in ('PATIENT_NAME', 'RELATIVE_NAME') and m.start(1) >= d.span[0] and m.end(1) <= d.span[1] for d in detections):
+                detections.append(Detection('PATIENT_NAME', f_name, (m.start(1), m.end(1)), channel=channel, role='patient'))
 
     # Doctor names in English and Devanagari (should NOT be removed)
     for m in RE_DOCTOR.finditer(text):
@@ -917,18 +994,18 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
 
     # Relative names from relation cues in English & Hindi
     for m in re.finditer(
-        r'(?i)(?:\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?|अभिभावक|पुत्र|पत्नी)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n]|$)',
+        r'(?i)(?:\b(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of)|पिता\s*(?:का\s*नाम)?|पति\s*(?:का\s*नाम)?|माता\s*(?:का\s*नाम)?|अभिभावक|पुत्र|पत्नी)\s*:?\s*([A-Za-z\u0900-\u097F][^\n,;|]*?)(?:\s*[,;|\n\)]|$)',
         text
     ):
         name = m.group(1).strip()
         if name and len(name) > 1:
-            name = re.split(r'(?i)\s*(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin|गाँव|ग्राम|पता)', name)[0].strip()
+            name = re.split(r'(?i)\s*(?:address|village|vill\.|house|h\.no|makan|tehsil|distt?\.?|dist\.|pin|गाँव|ग्राम|पता|[\),;\n\.])', name)[0].strip()
             if name and normalize_text(name) not in DOCTOR_NAMES:
                 detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.start(1) + len(name)),
                                           channel=channel, role='relative'))
 
-    # C/O names (but not complaints)
-    for m in re.finditer(r'(?i)\bC/O\s+', text):
+    # C/O names (negative lookbehind avoids matching K/C/O or H/C/O)
+    for m in re.finditer(r'(?i)(?<![kKhH]/)(?<!/)\bC/O\s+', text):
         pos = m.start()
         if not is_complaint_co(text, pos):
             # It's a care-of name
@@ -940,15 +1017,33 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
                                           channel=channel, role='relative'))
 
     # Attendant / Visitor / Caller / Witness patterns (canaries and attendant mentions)
-    for m in re.finditer(r'(?i)\b(?:called\s+by|witnessed\s+by|attendant:?|visitor:?)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)', text):
+    for m in re.finditer(r'(?i)\b(?:called\s+by|witnessed\s+by|attendant:?|visitor:?)[ \t]*(?:\([sSwWdD]/[oO][ \t]+)?([A-Z][a-zA-Z.]+(?:[ \t]+[A-Z][a-zA-Z.]+)*)', text):
         name = m.group(1).strip()
-        if not any(d in name.lower() for d in DRUG_NAMES) and normalize_text(name) not in DOCTOR_NAMES:
+        if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4) and normalize_text(name) not in DOCTOR_NAMES:
             detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
 
-    for m in re.finditer(r'(?i)\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\s*\((?:attendant|visitor|relative|bystander)', text):
+    for m in re.finditer(r'(?i)\b([A-Z][a-zA-Z.]+(?:[ \t]+[A-Z][a-zA-Z.]+)*)[ \t]*\((?:attendant|visitor|relative|bystander)', text):
         name = m.group(1).strip()
-        if not any(d in name.lower() for d in DRUG_NAMES) and normalize_text(name) not in DOCTOR_NAMES:
+        if not any(re.search(rf'\b{re.escape(d)}\b', name, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4) and normalize_text(name) not in DOCTOR_NAMES:
             detections.append(Detection('RELATIVE_NAME', name, (m.start(1), m.end(1)), channel=channel, role='relative'))
+
+    # Multi-word Latin names in text (e.g. Mohd. Shahid, Brajesh Yadav, Shanthi Chaudhary, Fatma Khatun) - horizontal whitespace only!
+    for m in re.finditer(r'\b([A-Z][a-zA-Z.]+(?:[ \t]+[A-Z][a-zA-Z.]+){1,2})\b', text):
+        cand = m.group(1).strip()
+        words = cand.split()
+        norm_words = [normalize_text(w) for w in words]
+        if any(w in MEDICAL_TERMS or w in DISEASE_EPONYMS or w in DOCTOR_NAMES or w in HOSPITAL_NAMES for w in norm_words):
+            continue
+        if any(re.search(rf'\b{re.escape(d)}\b', cand, re.IGNORECASE) for d in DRUG_NAMES if len(d) >= 4):
+            continue
+        non_generic_names = [w for w in norm_words if w in COMMON_INDIAN_NAMES and w not in GENERIC_NAME_TOKENS]
+        if non_generic_names:
+            start_pos = m.start(1)
+            pre = text[max(0, start_pos - 15):start_pos].lower()
+            if any(dr in pre for dr in ('dr.', 'dr ', 'doctor', 'consultant', 'hospital', 'clinic')):
+                continue
+            if not any(d.type in ('PATIENT_NAME', 'RELATIVE_NAME') and m.start(1) >= d.span[0] and m.end(1) <= d.span[1] for d in detections):
+                detections.append(Detection('PATIENT_NAME', cand, (m.start(1), m.end(1)), confidence=0.75, channel=channel))
 
     # Names in Devanagari (horizontal whitespace only, never cross lines!)
     for m in re.finditer(r'([\u0900-\u097F][\u0900-\u097F\u0300-\u036F \t]+)', text):
@@ -967,6 +1062,55 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
                 if not is_medical:
                     detections.append(Detection('PATIENT_NAME', segment,
                                               (m.start(), m.end()), confidence=0.7, channel=channel))
+
+    # Free-text Locality & Address patterns
+    for m in re.finditer(r'(?i)\bWard\s+\d+\b', text):
+        line_start = text.rfind('\n', 0, m.start())
+        line_start = 0 if line_start == -1 else line_start + 1
+        line_end = text.find('\n', m.end())
+        line_end = len(text) if line_end == -1 else line_end
+        line_txt = text[line_start:line_end].lower()
+        if any(k in line_txt for k in ('address', 'mohalla', 'h.no', 'house', 'pata', 'पता', 'निवास')):
+            detections.append(Detection('LOCALITY', m.group(0), (m.start(), m.end()), channel=channel))
+
+    for m in re.finditer(r'(?i)\b(?:mohalla|मोहल्ला)\s+([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F\s]+?)(?=\s*[,;|\n]|$)', text):
+        loc = m.group(0).strip()
+        detections.append(Detection('LOCALITY', loc, (m.start(), m.start() + len(loc)), channel=channel))
+
+    for m in re.finditer(r'(?i)\b(?:near|behind|opp\.?)\s+([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F\s]+?)(?=\s*[,;|\n]|$)', text):
+        lm = m.group(0).strip()
+        detections.append(Detection('LANDMARK', lm, (m.start(), m.start() + len(lm)), channel=channel))
+
+    for m in re.finditer(r'([\u0900-\u097F\s]+?)\s*(?:के\s*पास|के\s*पीछे|के\s*सामने)', text):
+        lm = m.group(0).strip()
+        if len(lm) > 4:
+            detections.append(Detection('LANDMARK', lm, (m.start(), m.start() + len(lm)), channel=channel))
+
+    for m in re.finditer(r'\b([A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F]+(?:\s+(?:Kalan|Khurd|कलां|खुर्द)))\b', text):
+        v_name = m.group(0).strip()
+        detections.append(Detection('VILLAGE', v_name, (m.start(), m.end()), channel=channel))
+
+    for m in re.finditer(r'(?i)\b([A-Za-z\u0900-\u097F]{3,})(?:,\s*(?:Tehsil|तहसील))\b', text):
+        cand = m.group(1).strip()
+        if normalize_text(cand) not in ('ward', 'mohalla', 'house', 'distt', 'district'):
+            detections.append(Detection('VILLAGE', cand, (m.start(1), m.end(1)), channel=channel))
+
+    if channel == 'header':
+        for m in re.finditer(r'\b([A-Z][a-zA-Z]+)\b', text):
+            cand = m.group(1).strip()
+            cand_low = cand.lower()
+            if cand_low in COMMON_INDIAN_NAMES and cand_low not in MEDICAL_TERMS and cand_low not in DRUG_NAMES:
+                detections.append(Detection('PATIENT_NAME', cand, (m.start(), m.end()), channel=channel, role='patient'))
+
+    for m in RE_PIN.finditer(text):
+        line_start = text.rfind('\n', 0, m.start())
+        line_start = 0 if line_start == -1 else line_start + 1
+        line_end = text.find('\n', m.end())
+        line_end = len(text) if line_end == -1 else line_end
+        line_txt = text[line_start:line_end].lower()
+        if any(kw in line_txt for kw in ('address', 'pin', 'pincode', 'dist', 'distt', 'tehsil', 'ward', 'mohalla', 'bareli', 'hardoi', 'lucknow', '-')):
+            if not is_dose_context(text, m.start(), m.end()):
+                detections.append(Detection('PIN', m.group(1), (m.start(1), m.end(1)), channel=channel))
 
     return detections
 
@@ -1073,13 +1217,15 @@ REMOVED_DIRECT_IDENTIFIERS: set[str] = set()
 def record_removed_identifier(det: Detection):
     """Record a removed identifier so the sweep verifier can audit the output."""
     s = det.surface.strip()
-    if len(s) < 3:
+    if len(s) < 3 or '[' in s or ']' in s or det.type in ('DOB', 'DATE', 'AGE', 'GENDER', 'PIN', 'HOUSE', 'LOCALITY', 'LANDMARK', 'VILLAGE'):
+        return
+    if re.search(r'\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b', s) or ('t' in s.lower() and ':' in s) or ('/' in s and ':' in s):
         return
     # Add exact surface
     REMOVED_DIRECT_IDENTIFIERS.add(s)
     # Digits if phone or ID
     digits = re.sub(r'\D', '', s)
-    if len(digits) >= 10:
+    if len(digits) >= 10 and not any(k in s.lower() for k in ('date', 'time', 't', 'utc', 'z')):
         REMOVED_DIRECT_IDENTIFIERS.add(digits)
     # Name variants
     if det.type in ('PATIENT_NAME', 'RELATIVE_NAME'):
@@ -1087,7 +1233,7 @@ def record_removed_identifier(det: Detection):
         if len(norm) >= 3 and norm not in GENERIC_NAME_TOKENS and norm not in MEDICAL_TERMS:
             REMOVED_DIRECT_IDENTIFIERS.add(norm)
             skel = name_skeleton(s)
-            if len(skel) >= 3:
+            if len(skel) >= 3 and skel not in GENERIC_NAME_TOKENS:
                 REMOVED_DIRECT_IDENTIFIERS.add(skel)
 
 
@@ -1140,26 +1286,44 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
     all_dets: list[Detection] = []
     h_norm = normalize_text(header) if header else ''
 
-    # Age banding for numbers or strings in age fields
-    if h_norm in {'age', 'umar', 'उम्र', 'आयु', 'patient_age', 'dob_age'}:
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
+    # Numbers (integers / floats)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        # Age banding
+        if h_norm in {'age', 'umar', 'उम्र', 'आयु', 'patient_age', 'dob_age'}:
             Stats.generalized += 1
             return age_band(int(v)), all_dets
-        if isinstance(v, str):
-            age_m = re.search(r'\d+', v)
-            if age_m:
-                try:
-                    band = age_band(int(age_m.group()))
-                    Stats.generalized += 1
-                    return band, all_dets
-                except ValueError:
-                    pass
+        # PIN code generalization
+        if h_norm in ('pin', 'pincode', 'postal_code', 'postalcode', 'zip'):
+            digits = str(int(v))
+            if len(digits) == 6:
+                Stats.generalized += 1
+                return digits[:3] + '***', all_dets
+            return '[PIN]', all_dets
+        # Identifiers stored as integers (e.g. Aadhaar, phone, MRN)
+        v_str = str(int(v))
+        h_type = classify_header(header) if header else None
+        if h_type == 'AADHAAR' or (len(v_str) == 12 and h_norm in ('aadhar_no', 'aadhaar', 'uid')):
+            d = Detection('AADHAAR', v_str, channel='content')
+            record_removed_identifier(d)
+            all_dets.append(d)
+            return '[AADHAAR]', all_dets
+        if h_type == 'PHONE' or (len(v_str) == 10 and h_norm in ('mobile', 'phone', 'contact')):
+            d = Detection('PHONE', v_str, channel='content')
+            record_removed_identifier(d)
+            all_dets.append(d)
+            return '[PHONE]', all_dets
+        if h_type == 'MRN':
+            d = Detection('MRN', v_str, channel='content')
+            record_removed_identifier(d)
+            all_dets.append(d)
+            return '[MRN]', all_dets
+        return v, all_dets
 
     # Location / PIN generalization in JSON
     if h_norm in ('village', 'gaon', 'गाँव', 'gram'):
         Stats.generalized += 1
         return '[VILLAGE]', all_dets
-    if h_norm in ('pin', 'pincode', 'postal_code', 'zip'):
+    if h_norm in ('pin', 'pincode', 'postal_code', 'postalcode', 'zip'):
         if isinstance(v, (str, int)):
             digits = re.sub(r'\D', '', str(v))
             if len(digits) == 6:
@@ -1176,6 +1340,41 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
 
     if isinstance(v, str):
         v_str = v.strip()
+        # Protect clinical panel names or test names when header == 'name'
+        if h_norm == 'name':
+            v_low = v_str.lower()
+            if v_low in ('routine', 'complete blood count', 'lipid profile', 'lft', 'kft', 'cbc') or v_low in MEDICAL_TERMS:
+                return v, all_dets
+
+        # FHIR HTML narrative in 'div'
+        if h_norm == 'div':
+            cleaned_div, div_dets = clean_text(v)
+            if div_dets:
+                all_dets.extend(div_dets)
+                return cleaned_div, all_dets
+
+        # FHIR display: if not doctor and not hospital, clean patient name
+        if h_norm == 'display':
+            if not v_str.startswith(('Dr.', 'Doctor ', 'Dr ', 'dr.')):
+                is_org = any(h in v_str.lower() for h in ('hospital', 'clinic', 'charitable', 'sadan', 'pathology', 'ward', 'department'))
+                if not is_org and not any(m in v_str.lower() for m in MEDICAL_TERMS):
+                    words = v_str.split()
+                    if 1 <= len(words) <= 4 and any(w.lower() in COMMON_INDIAN_NAMES for w in words):
+                        d = Detection('PATIENT_NAME', v_str, channel='content', role='patient')
+                        record_removed_identifier(d)
+                        all_dets.append(d)
+                        return '[PATIENT_NAME]', all_dets
+
+        # FHIR text in HumanName
+        if h_norm == 'text' and not v_str.startswith('{') and not v_str.startswith('<'):
+            if not v_str.startswith(('Dr.', 'Doctor ', 'Dr ')) and not any(m in v_str.lower() for m in MEDICAL_TERMS):
+                words = v_str.split()
+                if 1 <= len(words) <= 4 and any(w.lower() in COMMON_INDIAN_NAMES for w in words):
+                    d = Detection('PATIENT_NAME', v_str, channel='content', role='patient')
+                    record_removed_identifier(d)
+                    all_dets.append(d)
+                    return '[PATIENT_NAME]', all_dets
+
         # Clean source_path or path-like strings in metadata
         if (header and 'path' in header.lower()) or ('\\\\' in v_str) or ('/' in v_str):
             parts = re.split(r'([_\-\\\/])', v_str)
@@ -1229,15 +1428,37 @@ def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> 
 
     if isinstance(v, dict):
         result = {}
+        # FHIR extension context detection
+        url_val = str(v.get('url', '')).lower()
+        is_mother_ext = 'mother' in url_val
+        is_father_ext = 'father' in url_val or 'guardian' in url_val
+
         for k, x in v.items():
             new_k = k
-            if len(k) > 25 or any('\u0900' <= c <= '\u097F' for c in k):
+            # Clean PII from keys (e.g. "by_name": {"Jaspreet Singh": ...})
+            if any('\u0900' <= c <= '\u097F' for c in k) or any(w.lower() in COMMON_INDIAN_NAMES for w in k.split()):
                 key_dets = detect_pii_in_text(k, 'key')
                 if key_dets:
                     for d in key_dets:
                         new_k = new_k.replace(d.surface, make_replacement(d))
                     all_dets.extend(key_dets)
-            cleaned, dets = clean_value(x, header=k, shift=shift)
+            elif len(k) > 25:
+                key_dets = detect_pii_in_text(k, 'key')
+                if key_dets:
+                    for d in key_dets:
+                        new_k = new_k.replace(d.surface, make_replacement(d))
+                    all_dets.extend(key_dets)
+
+            elem_header = k
+            if is_mother_ext or is_father_ext:
+                if k in ('valueString', 'valuestring', 'value'):
+                    elem_header = 'relative_name'
+            elif h_norm in ('guardian', 'relative', 'attendant', 'contact') and k in ('name', 'first', 'last', 'local'):
+                elem_header = 'relative_name'
+            elif h_norm in ('name', 'patient', 'patient_name') and k in ('first', 'last', 'local'):
+                elem_header = 'patient_name'
+
+            cleaned, dets = clean_value(x, header=elem_header, shift=shift)
             result[new_k] = cleaned
             all_dets.extend(dets)
         return result, all_dets
@@ -1757,16 +1978,16 @@ def has_pii_in_filename(filename: str) -> bool:
     name = Path(filename).stem
     if re.search(r'(?<!\d)[6-9]\d{9}(?!\d)', name):
         return True
-    if re.search(r'(?i)(?:SNJ[/-]|JJH[/-]|UHID[/-]|DHH[/-]|ADM[-_]?\d+|IPD[-_]|IP[-_]\d+)', name):
+    if re.search(r'(?i)(?:SNJ[-/_]|JJH[-/_]|UHID[-/_]|DHH[-/_]|ADM[-_]?\d+|IPD[-_]|IP[-_]\d+)', name):
         return True
     if re.search(r'(?i)(?:trap[-_]|omega[-_]|token[-_])', name):
         return True
     parts = re.split(r'[_\-\s]', name)
     for part in parts:
         p_lower = part.lower()
-        if p_lower in COMMON_INDIAN_NAMES and p_lower not in GENERIC_NAME_TOKENS:
+        if p_lower in COMMON_INDIAN_NAMES:
             return True
-    if re.search(r'(?i)(?:Fatima|Geeta|Kavita|Parvati|Reena|Salma|Shahid|Sunil|Usha|Shabana|Zainab|Farida|Mohammad)', name):
+    if re.search(r'(?i)(?:Fatima|Geeta|Kavita|Parvati|Reena|Salma|Shahid|Sunil|Usha|Shabana|Zainab|Farida|Mohammad|Asha|Aneeta|Anita)', name):
         return True
     return False
 
@@ -1779,7 +2000,7 @@ def sanitize_filename(rel: str) -> str:
     # Replace phone numbers
     name = re.sub(r'(?<!\d)[6-9]\d{9}(?!\d)', lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
     # Replace MRNs
-    name = re.sub(r'(?i)(?:SNJ[/-]\d{2}[/-]\d+|JJH[/-]\d+|UHID[/-]\d+|DHH[/-]IPD[/-][\d-]+|ADM[-_]?\d+|IPD[-_][\d-]+|IP[-_]\d+[-_]\d+)',
+    name = re.sub(r'(?i)(?:SNJ[-/_]\d{2}[-/_]\d+|JJH[-/_]\d+|UHID[-/_]\d+|DHH[-/_]IPD[-/_][\d-]+|DHH[-/_][\d-]+|ADM[-_]?\d+|IPD[-_][\d-]+|IP[-_]\d+[-_]\d+)',
                   lambda m: hashlib.sha256(m.group(0).encode()).hexdigest()[:8], name)
     # Replace trap strings
     name = re.sub(r'(?i)(?:trap[-_][a-z0-9_-]+|token[-_][a-z0-9_-]+)',
@@ -1791,7 +2012,7 @@ def sanitize_filename(rel: str) -> str:
     for part in parts:
         if part in ('_', '-', ' '):
             new_parts.append(part)
-        elif part.lower() in COMMON_INDIAN_NAMES and part.lower() not in GENERIC_NAME_TOKENS:
+        elif part.lower() in COMMON_INDIAN_NAMES:
             h = hashlib.sha256(part.encode()).hexdigest()[:6]
             new_parts.append(h)
         else:
@@ -1846,6 +2067,8 @@ _DATE_FMTS = [
     ('%d/%m/%Y', re.compile(r'^\d{1,2}/\d{1,2}/\d{4}$')),
     ('%d-%m-%Y', re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$')),
     ('%d.%m.%Y', re.compile(r'^\d{1,2}\.\d{1,2}\.\d{4}$')),
+    ('%m/%d/%Y', re.compile(r'^\d{1,2}/\d{1,2}/\d{4}$')),
+    ('%m-%d-%Y', re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$')),
     ('%Y-%m-%d', re.compile(r'^\d{4}-\d{1,2}-\d{1,2}$')),
     ('%Y/%m/%d', re.compile(r'^\d{4}/\d{1,2}/\d{1,2}$')),
     ('%Y.%m.%d', re.compile(r'^\d{4}\.\d{1,2}\.\d{1,2}$')),
@@ -2006,7 +2229,8 @@ def process_csv(text: str, delimiter: str, rel: str, records: list,
     # Clean PII from header names (but keep structure)
     clean_header = []
     for h in header:
-        clean_header.append(h)
+        cleaned_h, h_dets = clean_text(h, 'header')
+        clean_header.append(cleaned_h)
     w.writerow(clean_header)
 
     for i, row in enumerate(body):
@@ -2301,6 +2525,10 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
         v_low = v.lower().strip()
         if len(v_low) < 4 or v_low in safe_veto or any(hw in v_low for hw in hosp_words):
             continue
+        if '[' in v_low or ']' in v_low:
+            continue
+        if re.search(r'\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b', v_low) or ('t' in v_low and ':' in v_low) or ('/' in v_low and ':' in v_low):
+            continue
         if v_low in DOCTOR_NAMES or any(v_low.startswith(pfx) for pfx in ('dr.', 'dr ', 'doctor ', 'consultant', 'सर्जन', 'डॉ.', 'चिकित्सक')):
             continue
         # Only probe for direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
@@ -2382,6 +2610,10 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
         for pv in probe_values:
             if pv.isascii() and pv.isalpha():
                 if re.search(rf'\b{re.escape(pv)}\b', content_norm):
+                    leak_found = True
+                    break
+            elif re.search(r'^\d+$', pv):
+                if re.search(rf'(?<!\d){re.escape(pv)}(?!\d)', content):
                     leak_found = True
                     break
             elif pv in content_norm:
