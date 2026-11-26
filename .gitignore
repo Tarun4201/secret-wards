@@ -34,6 +34,8 @@ env/
 out*/
 output/
 my_output/
+demo_out*/
+eval_output/
 /tmp/test_out
 
 # Environment & secrets
