@@ -36,3 +36,12 @@
   - Expanded `_try_shift_date_str` and `process_text` regex to parse and coherently shift Indian textual dates (`15 Jan 2024`, `15-Jan-2024`, `15.01.2024`, `Jan 15, 2024`, and Devanagari `15 जनवरी 2024`), preserving exact stay lengths.
   - Expanded `DRUG_NAMES` with ~100 essential Indian NLEM formulations and common Indian hospital brands (`pan-d`, `telma`, `combiflam`, `deriphyllin`, `ceftriaxone`, `calpol`, `moxikind`, `zerodol-sp`).
   - Broadened `is_dose_context` and `RE_DOSE` to protect complex dosing patterns (`1-0-1`, `1-1-1-1`, `OD`, `BD`, `TDS`, `QID`, `HS`, `SOS`, `STAT`, `x 5 days`, `खाने के बाद`) from being misflagged as identifiers.
+
+## 2026-11-26: Adversarial Stress Testing & Dual-Attacker Tooling
+- **Decision: Synthetic Challenge Data Generator (`tools/datagen/`):**
+  - Built deterministic synthetic generator creating a 22-file, 74-record challenge set covering Hinglish notes, Devanagari discharge records, multi-hospital UHID linkage, family-phone sharing traps, hidden base64 payloads, and planted canary tokens.
+- **Decision: LLM Red-Team Attacker (`tools/attacker/llm_attacker.py`):**
+  - Implemented adversarial red-team evaluator simulating an external attacker holding voter registry entries querying `@cf/openai/gpt-oss-120b` (with offline fallback for CI/offline environments).
+  - Both heuristic and LLM attackers confirmed **0.0% re-identification rate** and **0 direct leaks** on sanitized outputs.
+- **Decision: Doctor Header & Value Classification Guard:**
+  - Added `DOCTOR_HEADERS` to `SAFE_HEADER_TYPES` and value-fingerprint guard in `infer_column_type_from_values`, preventing doctor columns in structured CSV/TSV from being misclassified as patient PII.

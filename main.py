@@ -327,10 +327,13 @@ NAME_HEADERS = {
     'given', 'family', 'surname', 'पूरा नाम', 'नाम', 'रोगी का नाम', 'मरीज़ का नाम',
 }
 RELATIVE_HEADERS = {
-    'relative', 'relative name', 'relative_name', 'guardian', 'guardian name',
-    'father', "father's name", 'mother', "mother's name", 'spouse', 'husband',
-    'wife', 'parent', 'pita ka naam', 'pati ka naam', 'sambandhi ka naam',
-    'अभिभावक', 'पिता का नाम', 'पति का नाम', 'सम्बन्धी',
+    'relative', 'relative name', 'relative_name', 'relativename', 'guardian', 'guardian name',
+    'father', "father's name", 'father_name', 'fathername', 'mother', "mother's name",
+    'mother_name', 'mothername', 'spouse', 'husband', "husband's name", 'husband_name',
+    'wife', "wife's name", 'wife_name', 'parent', 'pita ka naam', 'pita_ka_naam',
+    'pati ka naam', 'pati_ka_naam', 'mata ka naam', 'mata_ka_naam', 'sambandhi ka naam',
+    's_o', 'd_o', 'w_o', 's/o', 'd/o', 'w/o', 's o', 'd o', 'w o',
+    'अभिभावक', 'पिता का नाम', 'पति का नाम', 'माता का नाम', 'सम्बन्धी',
 }
 PHONE_HEADERS = {
     'phone', 'mobile', 'mob', 'contact', 'contact no', 'contact_no', 'telephone',
@@ -385,6 +388,11 @@ GENDER_HEADERS = {
 RELATION_TYPE_HEADERS = {
     'relation', 'relation type', 'relation_type', 'sambandh', 'सम्बन्ध', 'रिश्ता',
 }
+DOCTOR_HEADERS = {
+    'doctor', 'dr', 'doc', 'consultant', 'surgeon', 'physician',
+    'treating doctor', 'treating_doctor', 'consultant doctor', 'doctor name',
+    'doctor_name', 'चिकित्सक', 'डॉक्टर',
+}
 
 PII_HEADER_MAP: dict[frozenset[str], str] = {
     frozenset(NAME_HEADERS): 'PATIENT_NAME',
@@ -406,6 +414,7 @@ SAFE_HEADER_TYPES = {
     frozenset(AGE_HEADERS): 'AGE',
     frozenset(GENDER_HEADERS): 'GENDER',
     frozenset(RELATION_TYPE_HEADERS): 'RELATION_TYPE',
+    frozenset(DOCTOR_HEADERS): 'DOCTOR',
 }
 
 def classify_header(header: str) -> str | None:
@@ -413,18 +422,29 @@ def classify_header(header: str) -> str | None:
     h = normalize_text(header).strip()
     h = re.sub(r'[_\-./]', ' ', h).strip()
 
-    # Exact match first
-    for header_set, pii_type in PII_HEADER_MAP.items():
-        if h in header_set:
-            return pii_type
-
-    # Safe-type exact match (age, gender, etc.) — these must NOT be PII
+    # 1. Safe-type exact match (age, gender, doctor, etc.) — these must NOT be PII
     for header_set in SAFE_HEADER_TYPES:
         if h in header_set:
             return None
 
-    # Fuzzy: only match if the normalized header CONTAINS the known header as a full word-boundary substring
-    # and the match is at least 3 chars (avoid matching 'e' in 'age' as 'email' etc.)
+    # 2. PII exact match: check RELATIVE_HEADERS before NAME_HEADERS
+    if h in RELATIVE_HEADERS:
+        return 'RELATIVE_NAME'
+    for header_set, pii_type in PII_HEADER_MAP.items():
+        if h in header_set:
+            return pii_type
+
+    # 3. Safe-type fuzzy match (e.g. "treating doctor", "consultant physician")
+    for header_set in SAFE_HEADER_TYPES:
+        for known in header_set:
+            if len(known) >= 3 and (known in h or h == known):
+                return None
+
+    # 4. Fuzzy: check RELATIVE_HEADERS before NAME_HEADERS
+    for known in RELATIVE_HEADERS:
+        if len(known) >= 3 and (known in h or h == known):
+            return 'RELATIVE_NAME'
+
     for header_set, pii_type in PII_HEADER_MAP.items():
         for known in header_set:
             if len(known) >= 4 and (known in h or h == known):
@@ -491,9 +511,22 @@ def infer_column_type_from_values(values: list[str]) -> str | None:
     if date_hits / n >= 0.5:
         return None  # Dates are not PII type per se; they're shifted, not removed
 
-    # Name columns: multi-word alphabetic strings, possibly with Devanagari
+    # Doctor columns: names starting with Dr./Doctor etc.
+    doc_hits = sum(1 for v in non_empty if re.match(r'(?i)^(?:dr\.?|doctor|consultant|surgeon|physician|डॉ\.?|चिकित्सक)\s+', v.strip()))
+    if doc_hits / n >= 0.3:
+        for v in non_empty:
+            doc_clean = re.sub(r'(?i)^(?:dr\.?|doctor|consultant|surgeon|physician|डॉ\.?|चिकित्सक)\s*:?\s*', '', v.strip())
+            DOCTOR_NAMES.add(normalize_text(v.strip()))
+            DOCTOR_NAMES.add(normalize_text(doc_clean))
+            for w in doc_clean.split():
+                if len(w) > 2:
+                    DOCTOR_NAMES.add(normalize_text(w))
+        return None
+
+    # Name columns: multi-word alphabetic strings, possibly with Devanagari (excluding doctor names)
     name_hits = sum(1 for v in non_empty
                     if re.match(r'^[A-Za-z\u0900-\u097F][A-Za-z\u0900-\u097F\s.]+$', v)
+                    and not re.match(r'(?i)^(?:dr\.?|doctor|consultant|surgeon|physician|डॉ\.?|चिकित्सक)\s+', v.strip())
                     and len(v.split()) >= 2 and avg_digit_ratio < 0.1)
     if name_hits / n >= 0.5:
         # Check if they look like Indian names from our gazetteer
@@ -802,7 +835,10 @@ def detect_pii_in_text(text: str, channel: str = 'content') -> list[Detection]:
     # Doctor names in English and Devanagari (should NOT be removed)
     for m in RE_DOCTOR.finditer(text):
         doc_raw = m.group(1).strip()
+        full_match = m.group(0).strip()
         DOCTOR_NAMES.add(normalize_text(doc_raw))
+        DOCTOR_NAMES.add(normalize_text(full_match))
+        DOCTOR_NAMES.add(normalize_text(re.sub(r'[:.]', '', full_match)))
         for w in doc_raw.split():
             if len(w) > 2:
                 DOCTOR_NAMES.add(normalize_text(w))
@@ -2132,6 +2168,8 @@ def run_sweep_verifier(san_dir: Path, files_report: list[dict], records: list[di
     for v in REMOVED_DIRECT_IDENTIFIERS:
         v_low = v.lower().strip()
         if len(v_low) < 4 or v_low in safe_veto or any(hw in v_low for hw in hosp_words):
+            continue
+        if v_low in DOCTOR_NAMES or any(v_low.startswith(pfx) for pfx in ('dr.', 'dr ', 'doctor ', 'consultant', 'सर्जन', 'डॉ.', 'चिकित्सक')):
             continue
         # Only probe for direct identifiers with digits (phone, aadhaar, mrn), full multi-word names, or canaries
         if any(c.isdigit() for c in v_low) or len(v_low.split()) >= 2 or 'canary' in v_low:

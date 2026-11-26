@@ -47,10 +47,11 @@ We prove the pipeline's effectiveness using the built-in **RAKSHA Attacker** (si
 
 ### Key Performance Highlights:
 - **Zero Direct Identifier Leaks:** 0 leaked names, phones, Aadhaar, UHID, or canaries across content, headers, filenames, or metadata.
-- **Attacker Neutralization:** Re-identification risk drops to 0.0%, surviving voter-list linkage attacks.
-- **100% Clinical Value Preservation:** Doses (`650 mg`), vitals (`120/80`), lab units, diagnoses, and exact stay durations are preserved without degradation.
-- **Speed & Efficiency:** Execution finishes in **< 0.5 seconds** per run with **~31 MB RSS**, consuming < 1% of the 15-minute / 4 GB platform limits.
-- **60 Automated Tests Passing:** Tier 1 (safety net), Tier 2 (quality & linkage), and Tier 3 (security, determinism, textual dates & NLEM clinical preservation) fully verified.
+- **Dual-Attacker Neutralization:** Both the heuristic Voter Registry Att (`VoterRegisterAttacker`) and the LLM Red-Team Attacker (`@cf/openai/gpt-oss-120b` via `LLMAttacker`) report **0.0% re-identification risk** and **0 direct leaks** across sanitized outputs.
+- **Challenge Dataset Stress Test:** Evaluated on a 22-file synthetic challenge set (74 records) spanning Hinglish notes, Devanagari discharge summaries, FHIR JSON bundles, and family-phone traps; neutralized 100% of planted canaries and quarantined 0 legitimate records.
+- **100% Clinical Value Preservation:** Doses (`650 mg`, `1-0-1`), vitals (`120/80`), lab units, diagnoses, and exact stay durations are preserved without degradation.
+- **Speed & Efficiency:** Execution finishes in **~0.27 - 0.33 seconds** per run with **~32.8 MB RSS**, consuming < 1% of the 15-minute / 4 GB platform limits.
+- **63 Automated Tests Passing:** Tier 1 (safety net), Tier 2 (quality, linkage & textual dates), and Tier 3 (security, determinism, NLEM & LLM attacker tools) fully verified.
 
 ---
 

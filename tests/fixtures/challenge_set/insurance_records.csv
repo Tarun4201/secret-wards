@@ -1,0 +1,6 @@
+Patient Name,Age,PAN,Email,Insurance ID,Phone,Diagnosis,Claim Amount
+Ajay Singh,37,ITYRE8933I,ajay.singh@example.com,INS-859782,8207939087,Fracture Left Femur,Rs. 160318
+Priya Paswan,36,HSDBB5786W,priya.paswan@example.com,INS-232413,9210152642,Dengue Fever,Rs. 305974
+Sanjay Siddiqui,55,LEBYM2070M,sanjay.siddiqui@example.com,INS-615633,6719571745,Preeclampsia,Rs. 364898
+Anita Chauhan,34,VYCGO7818T,anita.chauhan@example.com,INS-725084,7932894596,Diabetic Ketoacidosis,Rs. 204427
+Shahid Qureshi,44,WZHQP2625Y,shahid.qureshi@example.com,INS-317881,7384161612,Preeclampsia,Rs. 47565

@@ -1,0 +1,8 @@
+CASE NOTE
+Patient: Ashok Sharma
+Reference: canary-alpha-99
+Age: 55 yrs, Gender: Male
+
+C/O fever and cough since 3 days
+Rx: Tab Dolo 650 TDS, Tab Azithromycin 500mg OD x 5 days
+Follow up: 1 week

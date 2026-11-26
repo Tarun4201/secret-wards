@@ -1,0 +1,51 @@
+{
+  "hospital": "Arogya Sadan Hospital",
+  "department": {
+    "name": "Medicine",
+    "ward": {
+      "number": 3,
+      "bed": 12,
+      "patient": {
+        "name": "Suresh Tiwari",
+        "demographics": {
+          "age": 55,
+          "gender": "Male",
+          "contact": {
+            "phone": "8859088046",
+            "address": {
+              "village": "Pihani",
+              "district": "Hardoi",
+              "state": "UP",
+              "pin": "241403"
+            }
+          }
+        },
+        "clinical": {
+          "diagnosis": "COPD Exacerbation",
+          "vitals": {
+            "bp": "140/90",
+            "spo2": "91%",
+            "pulse": "92"
+          },
+          "medications": [
+            {
+              "drug": "Deriphyllin",
+              "dose": "1-0-1",
+              "route": "PO"
+            },
+            {
+              "drug": "Budecort",
+              "dose": "1mg",
+              "route": "Nebulization"
+            },
+            {
+              "drug": "Salbutamol",
+              "dose": "2 puffs",
+              "frequency": "QID"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

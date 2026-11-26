@@ -1,0 +1,11 @@
+{
+  "patient_name": "Kavita Ansari",
+  "age": 30,
+  "CANARY_TRACK3_BETA": "hidden_marker",
+  "notes": "Regular follow-up. Ref: canary-delta-42",
+  "attachment_data": "TmFtZTogS2F2aXRhIEFuc2FyaSwgQ2FuYXJ5OiBjYW5hcnktZGVsdGEtNDI=",
+  "diagnosis": "Hypothyroidism",
+  "medications": [
+    "Tab Thyronorm 50mcg OD"
+  ]
+}

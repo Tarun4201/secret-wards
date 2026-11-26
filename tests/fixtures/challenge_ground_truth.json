@@ -1,0 +1,318 @@
+{
+  "hinglish_note_01.txt": {
+    "patient_name": "Brij Singh",
+    "relative_name": "Ramesh Mishra",
+    "phone": "7339670711",
+    "aadhaar": "3143 2679 9935",
+    "village": "Shahpur",
+    "age": 62,
+    "admit_date": "12/01/2024",
+    "discharge_date": "19/01/2024",
+    "stay_days": 7,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR",
+      "VILLAGE"
+    ],
+    "clinical_preserve": [
+      "120/80",
+      "12.5 g/dL",
+      "1.8 lakhs/cumm"
+    ]
+  },
+  "hinglish_note_02.txt": {
+    "patient_name": "Reeta Pandey",
+    "relative_name": "Harjeet Kumar",
+    "phone": "9336696312",
+    "uhid": "SNJ/24/5557",
+    "age": 45,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "MRN"
+    ],
+    "clinical_preserve": [
+      "110/70",
+      "Pan-D 1-0-0",
+      "Sucralfate 10ml"
+    ]
+  },
+  "hinglish_note_03.txt": {
+    "patient_name": "Govind Sharma",
+    "relative_name": "Mohan Yadav",
+    "phone": "9465341213",
+    "aadhaar": "4276 3547 4527",
+    "age": 80,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR"
+    ],
+    "clinical_preserve": [
+      "Metformin 500mg BD",
+      "Glimepiride 2mg OD",
+      "Troponin I",
+      "2.4 ng/mL",
+      "ST elevation"
+    ]
+  },
+  "devanagari_discharge_01.txt": {
+    "patient_name": "रवि वर्मा",
+    "relative_name": "महेश पाण्डेय",
+    "phone": "6485451171",
+    "aadhaar": "8942 6635 5333",
+    "village": "बड़ागाँव",
+    "age": 59,
+    "admit_date": "10 जनवरी 2024",
+    "discharge_date": "17 जनवरी 2024",
+    "stay_days": 7,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR",
+      "VILLAGE"
+    ],
+    "clinical_preserve": [
+      "Ceftriaxone 1g IV BD",
+      "Azithromycin 500mg OD",
+      "SpO2 88%",
+      "SpO2 97%"
+    ]
+  },
+  "devanagari_discharge_02.txt": {
+    "patient_name": "अनीता कुमार",
+    "relative_name": "अशोक वर्मा",
+    "phone": "8990566476",
+    "age": 40,
+    "admit_date": "05 मार्च 2024",
+    "discharge_date": "08 मार्च 2024",
+    "stay_days": 3,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE"
+    ],
+    "clinical_preserve": [
+      "Normal Vaginal Delivery",
+      "2.8 kg",
+      "10.2 g/dL",
+      "120/80",
+      "Ferrous Sulphate"
+    ]
+  },
+  "sanjeevani_patients.csv": {
+    "record_count": 10,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR",
+      "VILLAGE",
+      "PIN",
+      "MRN"
+    ],
+    "sample_names": [
+      "Meera Pandey",
+      "Pooja Mishra",
+      "Rekha Gupta"
+    ]
+  },
+  "jeevan_jyoti_patients.csv": {
+    "record_count": 10,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "ABHA_NUMBER",
+      "ADDRESS",
+      "MRN"
+    ],
+    "sample_names": [
+      "Shahid Chauhan",
+      "Vikas Nishad",
+      "Suresh Kumar"
+    ]
+  },
+  "district_hospital_patients.tsv": {
+    "record_count": 10,
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR",
+      "VILLAGE",
+      "PIN",
+      "MRN"
+    ]
+  },
+  "family_phone_trap.csv": {
+    "record_count": 5,
+    "trap_type": "family_phone",
+    "families": [
+      {
+        "members": [
+          "Ramesh Sharma",
+          "Vikas Sharma"
+        ],
+        "shared_phone": "9518197538"
+      },
+      {
+        "members": [
+          "Fatima Bano",
+          "Mohammad Yusuf"
+        ],
+        "shared_phone": "6922050912"
+      }
+    ],
+    "must_not_link_across_families": true
+  },
+  "multi_hospital_linkage.json": {
+    "record_count": 3,
+    "trap_type": "cross_hospital_linkage",
+    "same_patient": "Suresh Kumar Verma",
+    "shared_identifiers": {
+      "phone": "6517532243",
+      "aadhaar": "4753 7624 3704"
+    },
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE",
+      "AADHAAR",
+      "VILLAGE",
+      "MRN"
+    ]
+  },
+  "canary_note.txt": {
+    "canary_tokens": [
+      "canary-alpha-99"
+    ],
+    "must_quarantine": true,
+    "patient_name": "Ashok Sharma"
+  },
+  "canary_data.json": {
+    "canary_tokens": [
+      "CANARY_TRACK3_BETA",
+      "canary-delta-42"
+    ],
+    "must_quarantine": true,
+    "patient_name": "Kavita Ansari",
+    "has_base64_canary": true
+  },
+  "canary_header.csv": {
+    "canary_tokens": [
+      "RAKSHA_CANARY_X"
+    ],
+    "must_quarantine": true,
+    "canary_location": "header"
+  },
+  "unseen_columns.csv": {
+    "record_count": 8,
+    "trap_type": "unseen_headers",
+    "inferred_pii_columns": {
+      "fld_1": "PATIENT_NAME",
+      "var_x": "PHONE",
+      "field_4": "AADHAAR"
+    }
+  },
+  "fhir_patients.json": {
+    "record_count": 2,
+    "format": "fhir_bundle",
+    "pii_types": [
+      "PATIENT_NAME",
+      "PHONE",
+      "AADHAAR",
+      "ADDRESS",
+      "DOB"
+    ]
+  },
+  "masked_aadhaar_records.csv": {
+    "record_count": 5,
+    "pii_types": [
+      "PATIENT_NAME",
+      "AADHAAR_MASKED",
+      "PHONE"
+    ]
+  },
+  "base64_embedded.json": {
+    "has_base64_pii": true,
+    "embedded_name": "Yusuf Paswan",
+    "embedded_phone": "9900942073",
+    "pii_types": [
+      "PATIENT_NAME",
+      "PHONE",
+      "MRN"
+    ]
+  },
+  "textual_dates_note.txt": {
+    "patient_name": "Ravi Paswan",
+    "relative_name": "Harjeet Qureshi",
+    "phone": "8429233929",
+    "age": 38,
+    "textual_dates": [
+      "15 Jan 2024",
+      "17th January 2024",
+      "22-Jan-2024",
+      "29 Jan 2024"
+    ],
+    "pii_types": [
+      "PATIENT_NAME",
+      "RELATIVE_NAME",
+      "PHONE"
+    ],
+    "clinical_preserve": [
+      "Combiflam 1-0-1",
+      "Cefixime 200mg BD",
+      "118/76"
+    ]
+  },
+  "insurance_records.csv": {
+    "record_count": 5,
+    "pii_types": [
+      "PATIENT_NAME",
+      "PAN",
+      "EMAIL",
+      "INSURANCE_ID",
+      "PHONE"
+    ]
+  },
+  "mohammad_variants.csv": {
+    "record_count": 4,
+    "trap_type": "name_skeleton_linkage",
+    "same_patient_variants": [
+      "Mohammad Yusuf Ansari",
+      "Mohd Yusuf Ansari",
+      "मोहम्मद यूसुफ़ अंसारी"
+    ],
+    "must_link_first_three": true,
+    "must_not_link_fourth": true
+  },
+  "nested_records.json": {
+    "patient_name": "Suresh Tiwari",
+    "phone": "8859088046",
+    "pii_types": [
+      "PATIENT_NAME",
+      "PHONE",
+      "VILLAGE",
+      "PIN"
+    ],
+    "clinical_preserve": [
+      "140/90",
+      "91%",
+      "Deriphyllin",
+      "1-0-1"
+    ]
+  },
+  "report_trap-string-omega-7.txt": {
+    "canary_tokens": [
+      "trap-string-omega-7"
+    ],
+    "canary_location": "filename",
+    "must_sanitize_filename": true
+  }
+}

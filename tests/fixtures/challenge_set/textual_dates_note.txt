@@ -1,0 +1,26 @@
+DISCHARGE SUMMARY
+Arogya Sadan Hospital, Hardoi
+
+Patient Name: Ravi Paswan
+S/o Harjeet Qureshi
+Age: 38 years   Gender: Male
+Contact: 8429233929
+
+Date of Admission: 15 Jan 2024
+Date of Surgery: 17th January 2024
+Date of Discharge: 22-Jan-2024
+
+Diagnosis: Acute Appendicitis
+Procedure: Laparoscopic Appendectomy under GA
+Surgeon: Dr. Amit Pandey
+
+Post-op Recovery: Uneventful
+Vitals: BP 118/76, Pulse 72/min, Temp 98.2°F
+
+Discharge Medications:
+1. Tab Combiflam 1-0-1 x 5 days
+2. Tab Pan-D 1-0-0 x 7 days
+3. Tab Cefixime 200mg BD x 5 days
+4. Betadine dressing daily
+
+Follow-up: Review on 29 Jan 2024 with wound check

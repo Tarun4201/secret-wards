@@ -1,0 +1,46 @@
+[
+  {
+    "hospital": "Sanjeevani Multi-Speciality Hospital",
+    "uhid": "SNJ/24/3091",
+    "patient_name": "Suresh Kumar Verma",
+    "father_name": "Ram Prasad Verma",
+    "age": 45,
+    "gender": "Male",
+    "phone": "6517532243",
+    "aadhaar": "4753 7624 3704",
+    "village": "Sandila",
+    "pin": "241204",
+    "admission_date": "2024-01-10",
+    "discharge_date": "2024-01-15",
+    "diagnosis": "Dengue Fever",
+    "treating_doctor": "Dr. R.K. Mehta"
+  },
+  {
+    "hospital": "District Hospital Hardoi",
+    "uhid": "DHH-IPD-2025-646",
+    "patient_name": "Suresh K. Verma",
+    "s_o": "Ram Prasad Verma",
+    "age": 45,
+    "sex": "M",
+    "contact_no": "6517532243",
+    "aadhar_no": "4753 7624 3704",
+    "gaon": "Sandila",
+    "admission": "15/03/2024",
+    "discharge": "20/03/2024",
+    "diagnosis": "Acute Gastroenteritis"
+  },
+  {
+    "hospital": "Jeevan Jyoti Charitable Hospital",
+    "reg_no": "JJH-13534",
+    "naam": "सुरेश कुमार वर्मा",
+    "pita_ka_naam": "राम प्रसाद वर्मा",
+    "umar": 45,
+    "ling": "पुरुष",
+    "mobile": "6517532243",
+    "aadhaar": "4753 7624 3704",
+    "gaon": "सण्डीला",
+    "tarikh_bharti": "10/06/2024",
+    "tarikh_chutti": "14/06/2024",
+    "rog": "मलेरिया"
+  }
+]
