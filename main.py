@@ -31,13 +31,25 @@ from typing import Any
 # Policy
 # ---------------------------------------------------------------------------
 def load_policy(path: Path) -> dict:
-    policy: dict[str, Any] = {}
+    policy: dict[str, Any] = {
+        "age_band_years": 5,
+        "date_shift_max_days": 180,
+        "min_group_size": 5,
+        "link_strong_threshold": 0.8,
+        "link_margin": 0.2,
+    }
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.split("#", 1)[0].strip()
             if ":" in line:
                 k, v = (x.strip() for x in line.split(":", 1))
-                policy[k] = int(v) if v.lstrip("-").isdigit() else v
+                try:
+                    if "." in v:
+                        policy[k] = float(v)
+                    else:
+                        policy[k] = int(v)
+                except ValueError:
+                    policy[k] = v
     return policy
 
 HERE = Path(__file__).resolve().parent
@@ -885,9 +897,45 @@ def clean_text(text: str, channel: str = 'content') -> tuple[str, list[Detection
     return result, filtered
 
 
-def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]]:
-    """Clean a JSON value recursively."""
+def clean_value(v: Any, header: str | None = None, shift: int | None = None) -> tuple[Any, list[Detection]]:
+    """Clean a JSON value recursively, applying date shifting and age banding."""
     all_dets: list[Detection] = []
+    h_norm = normalize_text(header) if header else ''
+
+    # Age banding for numbers or strings in age fields
+    if h_norm in {'age', 'umar', 'उम्र', 'आयु', 'patient_age', 'dob_age'}:
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            Stats.generalized += 1
+            return age_band(int(v)), all_dets
+        if isinstance(v, str):
+            age_m = re.search(r'\d+', v)
+            if age_m:
+                try:
+                    band = age_band(int(age_m.group()))
+                    Stats.generalized += 1
+                    return band, all_dets
+                except ValueError:
+                    pass
+
+    # Location / PIN generalization in JSON
+    if h_norm in ('village', 'gaon', 'गाँव', 'gram'):
+        Stats.generalized += 1
+        return '[VILLAGE]', all_dets
+    if h_norm in ('pin', 'pincode', 'postal_code', 'zip'):
+        if isinstance(v, (str, int)):
+            digits = re.sub(r'\D', '', str(v))
+            if len(digits) == 6:
+                Stats.generalized += 1
+                return digits[:3] + '***', all_dets
+            return '[PIN]', all_dets
+
+    # Date shifting in JSON date fields
+    if shift and any(d in h_norm for d in ('date', 'birthdate', 'dob', 'admission', 'discharge', 'doj', 'dod', 'visit', 'तारीख', 'दिनांक')):
+        if isinstance(v, str):
+            shifted = _try_shift_date_str(v, shift)
+            if shifted:
+                return shifted, all_dets
+
     if isinstance(v, str):
         v_str = v.strip()
         # Clean source_path or path-like strings in metadata
@@ -925,18 +973,25 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
                 record_removed_identifier(d)
                 v = v.replace(d.surface, make_replacement(d))
         return v, all_dets
+
     if isinstance(v, list):
         result = []
         for x in v:
-            cleaned, dets = clean_value(x)
+            elem_shift = shift
+            if isinstance(x, dict):
+                x_ev = extract_evidence_json(x)
+                if any(x_ev.get(k) for k in ('uhid', 'aadhaar', 'abha', 'phone', 'email')):
+                    x_key = (x_ev.get('uhid') or x_ev.get('aadhaar') or x_ev.get('abha') or
+                             x_ev.get('phone') or x_ev.get('email'))
+                    elem_shift = date_shift_days(x_key)
+            cleaned, dets = clean_value(x, header=header, shift=elem_shift)
             result.append(cleaned)
             all_dets.extend(dets)
         return result, all_dets
+
     if isinstance(v, dict):
         result = {}
         for k, x in v.items():
-            # Only scan the KEY itself for PII if it looks like free-text (long or has Devanagari).
-            # Schema field names like "patient_name" are structural — never rename them.
             new_k = k
             if len(k) > 25 or any('\u0900' <= c <= '\u097F' for c in k):
                 key_dets = detect_pii_in_text(k, 'key')
@@ -944,11 +999,11 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
                     for d in key_dets:
                         new_k = new_k.replace(d.surface, make_replacement(d))
                     all_dets.extend(key_dets)
-            # Clean value with header context
-            cleaned, dets = clean_value(x, header=k)
+            cleaned, dets = clean_value(x, header=k, shift=shift)
             result[new_k] = cleaned
             all_dets.extend(dets)
         return result, all_dets
+
     return v, all_dets
 
 
@@ -956,7 +1011,7 @@ def clean_value(v: Any, header: str | None = None) -> tuple[Any, list[Detection]
 # Linkage engine
 # ---------------------------------------------------------------------------
 class PatientCluster:
-    """Groups of records belonging to the same patient."""
+    """Evidence-Graph Record Linker with Negative Evidence (Technique 3)."""
     def __init__(self):
         self.clusters: dict[str, set[str]] = {}  # cluster_key -> set of record_ids
         self.record_to_cluster: dict[str, str] = {}  # record_id -> cluster_key
@@ -965,20 +1020,135 @@ class PatientCluster:
     def add_evidence(self, record_id: str, ev: dict[str, Any]):
         self.evidence[record_id] = ev
 
+    def _records_contradict(self, rid1: str, rid2: str) -> bool:
+        """Check if two records contradict each other (negative evidence constraint)."""
+        ev1 = self.evidence.get(rid1, {})
+        ev2 = self.evidence.get(rid2, {})
+
+        # 1. Contradicting unique IDs
+        for id_field in ('aadhaar', 'pan', 'abha'):
+            v1, v2 = ev1.get(id_field), ev2.get(id_field)
+            if v1 and v2:
+                n1 = re.sub(r'[\s\-/]', '', str(v1)).lower()
+                n2 = re.sub(r'[\s\-/]', '', str(v2)).lower()
+                if n1 != n2:
+                    return True
+
+        u1, u2 = ev1.get('uhid'), ev2.get('uhid')
+        if u1 and u2:
+            n1 = re.sub(r'[\s\-/]', '', str(u1)).lower()
+            n2 = re.sub(r'[\s\-/]', '', str(u2)).lower()
+            if n1 != n2:
+                return True
+
+        # 2. Gender contradiction
+        g1, g2 = ev1.get('gender'), ev2.get('gender')
+        if g1 and g2 and g1.upper() != g2.upper():
+            return True
+
+        # 3. Age contradiction (> 5 years gap is impossible for same patient)
+        a1, a2 = ev1.get('age'), ev2.get('age')
+        if a1 and a2:
+            try:
+                if abs(int(a1) - int(a2)) > 5:
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        # 4. Family phone trap: same phone but distinct name skeletons and no matching relative
+        p1, p2 = ev1.get('phone'), ev2.get('phone')
+        if p1 and p2 and p1 == p2:
+            name1, name2 = ev1.get('patient_name'), ev2.get('patient_name')
+            if name1 and name2:
+                sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
+                if sk1 and sk2 and sk1 != sk2:
+                    rel1, rel2 = ev1.get('relative_name'), ev2.get('relative_name')
+                    rel_match = False
+                    if rel1 and rel2:
+                        rsk1, rsk2 = name_skeleton(rel1), name_skeleton(rel2)
+                        if rsk1 and rsk2 and rsk1 == rsk2:
+                            rel_match = True
+                    if not rel_match:
+                        return True
+
+        return False
+
+    def _cluster_contradicts(self, cluster_key: str, rid: str) -> bool:
+        """Check if rid contradicts any member of cluster."""
+        return any(self._records_contradict(rid, m) for m in self.clusters.get(cluster_key, set()))
+
+    def _compute_link_score(self, rid1: str, rid2: str) -> float:
+        """Compute weighted evidence score between two records in [0.0, 1.0]."""
+        if self._records_contradict(rid1, rid2):
+            return 0.0
+
+        ev1 = self.evidence.get(rid1, {})
+        ev2 = self.evidence.get(rid2, {})
+        score = 0.0
+
+        # Patient name skeleton (weight 0.35)
+        name1, name2 = ev1.get('patient_name', ''), ev2.get('patient_name', '')
+        if name1 and name2:
+            sk1, sk2 = name_skeleton(name1), name_skeleton(name2)
+            if sk1 and sk2:
+                if sk1 == sk2:
+                    score += 0.35
+                elif sk1 in sk2 or sk2 in sk1:
+                    score += 0.20
+
+        # Relative name skeleton (weight 0.30)
+        rel1, rel2 = ev1.get('relative_name', ''), ev2.get('relative_name', '')
+        if rel1 and rel2:
+            rsk1, rsk2 = name_skeleton(rel1), name_skeleton(rel2)
+            if rsk1 and rsk2:
+                if rsk1 == rsk2:
+                    score += 0.30
+                elif rsk1 in rsk2 or rsk2 in rsk1:
+                    score += 0.15
+
+        # Village / Locality / PIN prefix (weight 0.20)
+        v1, v2 = ev1.get('village', ''), ev2.get('village', '')
+        p1, p2 = ev1.get('pin', ''), ev2.get('pin', '')
+        if v1 and v2 and normalize_text(v1) == normalize_text(v2):
+            score += 0.20
+        elif p1 and p2 and str(p1)[:3] == str(p2)[:3]:
+            score += 0.10
+
+        # Age match (weight 0.15)
+        a1, a2 = ev1.get('age'), ev2.get('age')
+        if a1 and a2:
+            try:
+                diff = abs(int(a1) - int(a2))
+                if diff == 0:
+                    score += 0.15
+                elif diff <= 2:
+                    score += 0.10
+                elif diff <= 5:
+                    score += 0.05
+            except (ValueError, TypeError):
+                pass
+
+        return round(score, 3)
+
+    def _score_record_against_cluster(self, rid: str, cluster_key: str) -> float:
+        """Compute max evidence score of rid against members of cluster_key (0.0 if any contradicts)."""
+        if self._cluster_contradicts(cluster_key, rid):
+            return 0.0
+        scores = [self._compute_link_score(rid, m) for m in self.clusters[cluster_key]]
+        return max(scores) if scores else 0.0
+
     def link(self):
-        """Link records based on shared identifiers."""
-        # Phase 1: Group by strong IDs (UHID, Aadhaar, ABHA, phone)
+        """Link records using multi-pass blocking, negative evidence, and candidate margin scoring."""
+        # Pass 1: Strong unique government and hospital IDs
         id_groups: dict[str, list[str]] = defaultdict(list)
         for rid, ev in self.evidence.items():
-            for id_type in ('uhid', 'aadhaar', 'abha', 'phone', 'email', 'pan', 'insurance'):
+            for id_type in ('uhid', 'aadhaar', 'abha', 'pan', 'insurance'):
                 val = ev.get(id_type)
                 if val:
-                    # Normalize
                     val_n = re.sub(r'[\s\-/]', '', str(val)).lower()
                     if val_n and len(val_n) >= 4:
                         id_groups[f"{id_type}:{val_n}"].append(rid)
 
-        # Build clusters from strong ID matches with contradiction checks
         for key, rids in id_groups.items():
             if len(rids) < 2:
                 continue
@@ -995,102 +1165,103 @@ class PatientCluster:
                         self.record_to_cluster[r1] = canonical
                         self.record_to_cluster[r2] = canonical
                     elif c1 is not None and c2 is None:
-                        if not any(self._records_contradict(r2, m) for m in self.clusters[c1]):
+                        if not self._cluster_contradicts(c1, r2):
                             self.clusters[c1].add(r2)
                             self.record_to_cluster[r2] = c1
                     elif c1 is None and c2 is not None:
-                        if not any(self._records_contradict(r1, m) for m in self.clusters[c2]):
+                        if not self._cluster_contradicts(c2, r1):
                             self.clusters[c2].add(r1)
                             self.record_to_cluster[r1] = c2
                     elif c1 is not None and c2 is not None and c1 != c2:
-                        if not self._contradicts(c1, c2):
+                        if not any(self._cluster_contradicts(c1, m) for m in self.clusters[c2]):
                             self.clusters[c1].update(self.clusters.pop(c2, set()))
                             for m in list(self.clusters[c1]):
                                 self.record_to_cluster[m] = c1
 
-        # Phase 2: Name-based linking for unlinked records
-        # Group by name skeleton
-        name_groups: dict[str, list[str]] = defaultdict(list)
+        # Pass 2: Phone number with corroboration (guard against family phone trap)
+        phone_groups: dict[str, list[str]] = defaultdict(list)
         for rid, ev in self.evidence.items():
-            if rid in self.record_to_cluster:
+            p = ev.get('phone')
+            if p and len(p) >= 10:
+                phone_groups[p].append(rid)
+
+        for phone, rids in phone_groups.items():
+            if len(rids) < 2:
                 continue
-            name = ev.get('patient_name', '')
-            if name:
-                skel = name_skeleton(name)
-                if skel and len(skel) > 2:
-                    name_groups[skel].append(rid)
+            for i in range(len(rids)):
+                for j in range(i + 1, len(rids)):
+                    r1, r2 = rids[i], rids[j]
+                    if self._records_contradict(r1, r2):
+                        continue
+                    # Must share name skeleton OR relative OR close age / location
+                    ev1, ev2 = self.evidence.get(r1, {}), self.evidence.get(r2, {})
+                    sk1 = name_skeleton(ev1.get('patient_name', ''))
+                    sk2 = name_skeleton(ev2.get('patient_name', ''))
+                    rel1 = name_skeleton(ev1.get('relative_name', ''))
+                    rel2 = name_skeleton(ev2.get('relative_name', ''))
+                    a1, a2 = ev1.get('age'), ev2.get('age')
+                    close_age = False
+                    if a1 and a2:
+                        try:
+                            close_age = abs(int(a1) - int(a2)) <= 2
+                        except (ValueError, TypeError):
+                            pass
+                    has_corrob = (
+                        (sk1 and sk2 and sk1 == sk2) or
+                        (rel1 and rel2 and rel1 == rel2) or
+                        (ev1.get('village') and ev2.get('village') and normalize_text(ev1['village']) == normalize_text(ev2['village'])) or
+                        close_age
+                    )
+                    if not has_corrob:
+                        continue
 
-        # For each name group, try to link with existing clusters
-        for skel, rids in name_groups.items():
-            # Find clusters with matching names
-            matching_clusters = []
-            for ckey, members in self.clusters.items():
-                for m in members:
-                    m_name = self.evidence.get(m, {}).get('patient_name', '')
-                    if m_name and name_skeleton(m_name) == skel:
-                        matching_clusters.append(ckey)
-                        break
+                    c1 = self.record_to_cluster.get(r1)
+                    c2 = self.record_to_cluster.get(r2)
+                    if c1 is None and c2 is None:
+                        canonical = r1
+                        self.clusters[canonical] = {r1, r2}
+                        self.record_to_cluster[r1] = canonical
+                        self.record_to_cluster[r2] = canonical
+                    elif c1 is not None and c2 is None:
+                        if not self._cluster_contradicts(c1, r2):
+                            self.clusters[c1].add(r2)
+                            self.record_to_cluster[r2] = c1
+                    elif c1 is None and c2 is not None:
+                        if not self._cluster_contradicts(c2, r1):
+                            self.clusters[c2].add(r1)
+                            self.record_to_cluster[r1] = c2
+                    elif c1 is not None and c2 is not None and c1 != c2:
+                        if not any(self._cluster_contradicts(c1, m) for m in self.clusters[c2]):
+                            self.clusters[c1].update(self.clusters.pop(c2, set()))
+                            for m in list(self.clusters[c1]):
+                                self.record_to_cluster[m] = c1
 
-            if len(matching_clusters) == 1:
-                # Unambiguous match - check for corroborating evidence
-                ckey = matching_clusters[0]
-                for rid in rids:
-                    if self._has_corroboration(rid, ckey):
-                        self.clusters[ckey].add(rid)
-                        self.record_to_cluster[rid] = ckey
-            elif len(matching_clusters) == 0 and len(rids) >= 2:
-                # New cluster from name group, with extra checks
-                canonical = rids[0]
-                self.clusters[canonical] = set(rids)
-                for rid in rids:
-                    self.record_to_cluster[rid] = canonical
+        # Pass 3: Candidate Margin Scoring for Unlinked Fragments (Technique 3)
+        strong_threshold = float(POLICY.get("link_strong_threshold", 0.8))
+        margin = float(POLICY.get("link_margin", 0.2))
 
-    def _records_contradict(self, rid1: str, rid2: str) -> bool:
-        """Check if two records contradict each other on gender or age."""
-        ev1 = self.evidence.get(rid1, {})
-        ev2 = self.evidence.get(rid2, {})
-        g1, g2 = ev1.get('gender'), ev2.get('gender')
-        if g1 and g2 and g1.upper() != g2.upper():
-            return True
-        a1, a2 = ev1.get('age'), ev2.get('age')
-        if a1 and a2:
-            try:
-                if abs(int(a1) - int(a2)) > 5:
-                    return True
-            except (ValueError, TypeError):
-                pass
-        return False
+        unlinked = [rid for rid in self.evidence if rid not in self.record_to_cluster]
+        for rid in unlinked:
+            if not self.clusters:
+                break
+            cluster_scores: list[tuple[float, str]] = []
+            for ckey in list(self.clusters.keys()):
+                score = self._score_record_against_cluster(rid, ckey)
+                if score > 0.0:
+                    cluster_scores.append((score, ckey))
 
-    def _contradicts(self, cluster1: str, cluster2: str) -> bool:
-        """Check if two clusters have contradicting evidence."""
-        for r1 in self.clusters.get(cluster1, set()):
-            for r2 in self.clusters.get(cluster2, set()):
-                if self._records_contradict(r1, r2):
-                    return True
-        return False
+            if not cluster_scores:
+                continue
 
-    def _has_corroboration(self, record_id: str, cluster_key: str) -> bool:
-        """Check if a record has corroborating evidence with a cluster."""
-        ev = self.evidence.get(record_id, {})
-        for member in self.clusters.get(cluster_key, set()):
-            m_ev = self.evidence.get(member, {})
-            # Check for matching relative
-            rel1, rel2 = ev.get('relative_name', ''), m_ev.get('relative_name', '')
-            if rel1 and rel2 and name_skeleton(rel1) == name_skeleton(rel2):
-                return True
-            # Check for matching village
-            v1, v2 = ev.get('village', ''), m_ev.get('village', '')
-            if v1 and v2 and normalize_text(v1) == normalize_text(v2):
-                return True
-            # Matching age (within 2 years)
-            a1, a2 = ev.get('age'), m_ev.get('age')
-            if a1 and a2:
-                try:
-                    if abs(int(a1) - int(a2)) <= 2:
-                        return True
-                except (ValueError, TypeError):
-                    pass
-        return False
+            cluster_scores.sort(key=lambda x: x[0], reverse=True)
+            best_score, best_cluster = cluster_scores[0]
+            runner_up_score = cluster_scores[1][0] if len(cluster_scores) > 1 else 0.0
+
+            # Must beat strong threshold AND beat runner-up by margin
+            if best_score >= strong_threshold and (best_score - runner_up_score) >= margin:
+                if not self._cluster_contradicts(best_cluster, rid):
+                    self.clusters[best_cluster].add(rid)
+                    self.record_to_cluster[rid] = best_cluster
 
     def get_pseudonym(self, record_id: str) -> str | None:
         """Get pseudonym for a record, or None if unlinked."""
@@ -1487,12 +1658,20 @@ def process_json(text: str, rel: str, records: list,
         for v in data.values()
     )
 
+    doc_shift = None
     if is_doc:
         record_id = f"{rel}:doc"
         # Extract evidence from the whole document
         if isinstance(data, dict):
             ev = extract_evidence_json(data)
             linker.add_evidence(record_id, ev)
+            patient_key = (
+                ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+                ev.get('phone') or ev.get('email') or record_id
+            )
+            doc_shift = date_shift_days(patient_key)
+        else:
+            doc_shift = date_shift_days(record_id)
         records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": None})
         Stats.records += 1
     else:
@@ -1511,8 +1690,8 @@ def process_json(text: str, rel: str, records: list,
                     })
                     Stats.records += 1
 
-    # Clean the JSON data
-    cleaned, dets = clean_value(data)
+    # Clean the JSON data with coherent date shifting & age banding
+    cleaned, dets = clean_value(data, shift=doc_shift)
     Stats.identifiers += len(dets)
 
     return json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n"
@@ -1526,7 +1705,43 @@ def process_text(text: str, rel: str, records: list,
     records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": None})
     Stats.records += 1
 
-    # Clean the text
+    patient_key = (
+        ev.get('uhid') or ev.get('aadhaar') or ev.get('abha') or
+        ev.get('phone') or ev.get('email') or record_id
+    )
+    shift = date_shift_days(patient_key)
+
+    # 1. Band age in free text: e.g. "Age: 45 yrs", "Age: 45", "Age-45", "उम्र: 45"
+    def _replace_age(m):
+        prefix = m.group(1)
+        age_str = m.group(2)
+        suffix = m.group(3) or ''
+        try:
+            val = int(age_str)
+            Stats.generalized += 1
+            return f"{prefix}{age_band(val)}{suffix}"
+        except ValueError:
+            return m.group(0)
+
+    text = re.sub(
+        r'(?i)\b((?:age|umar|उम्र|आयु)\s*[:=\-]?\s*)(\d{1,3})(\s*(?:yrs|years|yr|साल|वर्ष)?)',
+        _replace_age,
+        text
+    )
+
+    # 2. Coherent date shifting in text (preserves stay length intervals)
+    def _shift_date_match(m):
+        raw_date = m.group(0)
+        shifted = _try_shift_date_str(raw_date, shift)
+        return shifted if shifted else raw_date
+
+    text = re.sub(
+        r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
+        _shift_date_match,
+        text
+    )
+
+    # 3. Clean remaining PII from the text
     cleaned, dets = clean_text(text)
     Stats.identifiers += len(dets)
 
@@ -1548,6 +1763,54 @@ def peak_rss_mb() -> float:
         return round(r / 1024 if sys.platform != "darwin" else r / 1048576, 1)
     except Exception:
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Risk-Gated Privacy Planner (Technique 4)
+# ---------------------------------------------------------------------------
+class PrivacyPlanner:
+    """Measures re-identification risk (k-anonymity) on release candidate
+    and applies the escalation ladder to quasi-identifiers.
+    """
+    def __init__(self, min_k: int = 5):
+        self.min_k = min_k
+
+    def plan_and_generalize(self, san_dir: Path, final_records: list[dict], evidence_map: dict[str, dict]) -> None:
+        """Measure quasi-identifier profile frequencies and apply ladder rules if group size < min_k."""
+        qi_profiles: dict[tuple, list[dict]] = defaultdict(list)
+        for r in final_records:
+            file_rel = r["file"].replace("sanitized/", "", 1)
+            loc = r["loc"]
+            rec_id = f"{file_rel}:{loc}"
+            ev = evidence_map.get(rec_id, {})
+            age = ev.get('age')
+            raw_age_band = age_band(int(age)) if age and str(age).isdigit() else '[AGE]'
+            loc_qi = ev.get('village') or (str(ev.get('pin'))[:3] + '***' if ev.get('pin') else '[LOC]')
+            qi_key = (raw_age_band, loc_qi)
+            qi_profiles[qi_key].append(r)
+
+        # Check k-anonymity
+        for qi_key, recs in qi_profiles.items():
+            if len(recs) < self.min_k:
+                # Group below k: broaden 5-yr age band to 10-yr band
+                for r in recs:
+                    file_path = san_dir / r["file"].replace("sanitized/", "", 1)
+                    if not file_path.exists():
+                        continue
+                    try:
+                        content = file_path.read_text(encoding="utf-8")
+                        # Find 5-year band like [40-44] and broaden to 10-year [40-49]
+                        m = re.search(r'\[(\d{1,3})-(\d{1,3})\]', content)
+                        if m:
+                            lo = int(m.group(1))
+                            lo_10 = (lo // 10) * 10
+                            hi_10 = lo_10 + 9
+                            widened = f"[{lo_10}-{hi_10}]"
+                            content = content.replace(m.group(0), widened)
+                            Stats.generalized += 1
+                            file_path.write_text(content, encoding="utf-8", newline="")
+                    except Exception:
+                        pass
 
 
 # ---------------------------------------------------------------------------
@@ -1845,6 +2108,10 @@ def main() -> int:
                     file_path.write_text(content, encoding="utf-8", newline="")
                 except (OSError, UnicodeError):
                     pass
+
+    # Phase 4b: Risk-Gated Privacy Planner (Technique 4)
+    planner = PrivacyPlanner(min_k=int(POLICY.get("min_group_size", 5)))
+    planner.plan_and_generalize(san, final_records, linker.evidence)
 
     # Phase 5: Sweep Verifier (Technique 5)
     run_sweep_verifier(san, files_report, final_records)
