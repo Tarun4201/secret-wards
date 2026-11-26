@@ -204,42 +204,34 @@ raksha/
 
 ### Pre-Event Preparation (While You Have Internet)
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/Tarun4201/secret-wards.git
-cd secret-wards
+```powershell
+cd E:\scalar_hackthon\secret-wards
 
-# 2. Create a virtual environment
-python3 -m venv .venv
+python.exe -m venv .venv
 
-# 3. Activate it
-#    macOS / Linux:
-source .venv/bin/activate
-#    Windows PowerShell:
-#    .venv\Scripts\Activate.ps1
-#    Windows CMD:
-#    .venv\Scripts\activate.bat
+.\.venv\Scripts\Activate.ps1
 
-# 4. Install runtime dependencies
+python -m pip install --upgrade pip
+
 pip install -r requirements.txt
 
-# 5. (Optional) Install dev/test dependencies
 pip install -r requirements-dev.txt
+```
 
-# 6. Verify everything is installed
-pip list | grep -E "regex|rapidfuzz|jellyfish|phonenumbers|indic-transliteration|psutil"
+Verify installation and run tests:
 
-# 7. Run tests to confirm it works
+```powershell
 make test
+# or: python -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### Pre-Download All Wheels for Offline Install
 
 If your teammates need to install on a machine without internet:
 
-```bash
+```powershell
 # Download all wheels to a folder (run this WHILE ONLINE)
-mkdir -p offline_wheels
+mkdir offline_wheels
 pip download -r requirements.txt -d offline_wheels/
 pip download -r requirements-dev.txt -d offline_wheels/
 
@@ -248,51 +240,48 @@ pip download -r requirements-dev.txt -d offline_wheels/
 
 ### Offline Install (No Internet)
 
-```bash
-cd secret-wards
+```powershell
+cd E:\scalar_hackthon\secret-wards
 
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate   # or Windows equivalent
+python.exe -m venv .venv
+
+.\.venv\Scripts\Activate.ps1
 
 # Install from local wheels
 pip install --no-index --find-links=offline_wheels/ -r requirements.txt
 
+pip install --no-index --find-links=offline_wheels/ -r requirements-dev.txt
+
 # Verify
-python3 -c "import regex, rapidfuzz, jellyfish, phonenumbers, indic_transliteration, psutil; print('All deps OK')"
+python -c "import regex, rapidfuzz, jellyfish, phonenumbers, indic_transliteration, psutil; print('All deps OK')"
 ```
 
 ---
 
 ## Running the Pipeline
 
-### Basic Usage
-
-```bash
-# 1. Activate virtual environment
-source .venv/bin/activate
-
-# 2. Set the secret key (REQUIRED — used for pseudonym generation)
-export RAKSHA_SECRET="your-team-secret-key-here"
-
-# 3. Run the pipeline
-python3 main.py --input /path/to/input --output /path/to/output
-```
-
 ### Windows PowerShell
 
 ```powershell
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 $env:RAKSHA_SECRET = "your-team-secret-key-here"
 python main.py --input C:\path\to\input --output C:\path\to\output
 ```
 
-### Example with Practice Data
+### macOS / Linux (Bash)
 
 ```bash
+source .venv/bin/activate
+export RAKSHA_SECRET="your-team-secret-key-here"
+python main.py --input /path/to/input --output /path/to/output
+```
+
+### Example with Practice Data
+
+```powershell
 # Assuming toolkit is in a sibling directory
-export RAKSHA_SECRET="my-secret-2024"
-python3 main.py --input ../toolkit/dev/input --output ./output
+$env:RAKSHA_SECRET = "my-secret-2024"
+python main.py --input ..\toolkit\dev\input --output .\output
 ```
 
 ### What Happens
@@ -314,20 +303,20 @@ python3 main.py --input ../toolkit/dev/input --output ./output
 
 ## Running Tests
 
-```bash
+```powershell
 # Activate virtual environment first
-source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1
 
 # Run all 67 tests
 make test
 # or equivalently:
-python3 -m unittest discover -s tests -p "test_*.py"
+python -m unittest discover -s tests -p "test_*.py"
 
 # Run a specific test file
-python3 -m unittest tests.test_clinical_protection
+python -m unittest tests.test_clinical_protection
 
 # Run with verbose output
-python3 -m unittest discover -s tests -p "test_*.py" -v
+python -m unittest discover -s tests -p "test_*.py" -v
 
 # Run with pytest (if installed)
 pytest tests/ -v
@@ -358,12 +347,12 @@ pytest tests/ -v
 
 Test how well the pipeline resists re-identification:
 
-```bash
+```powershell
 # Run the voter-registry attacker against sanitized output
-python3 tools/attacker/attacker.py \
-    --registry ../toolkit/dev/attacker/registry.csv \
-    --sanitized ./output/sanitized \
-    --records ./output/records.jsonl
+python tools/attacker/attacker.py `
+    --registry ..\toolkit\dev\attacker\registry.csv `
+    --sanitized .\output\sanitized `
+    --records .\output\records.jsonl
 ```
 
 ### Run the Full Benchmark Suite
@@ -382,17 +371,17 @@ make ablation
 
 Run the official toolkit checks to verify submission readiness:
 
-```bash
+```powershell
 # 1. Validate output contract
-python3 ../toolkit/validate_output.py --input ../toolkit/dev/input --output ./output
+python ..\toolkit\validate_output.py --input ..\toolkit\dev\input --output .\output
 # Expected: "CONTRACT OK"
 
 # 2. Check detection accuracy
-python3 ../toolkit/check_dev.py --output ./output --show 10
+python ..\toolkit\check_dev.py --output .\output --show 10
 # Expected: 0 leaks, 0 canaries
 
 # 3. Full submission check (runs pipeline 3x for determinism)
-python3 ../toolkit/check_submission.py --repo . --run
+python ..\toolkit\check_submission.py --repo . --run
 # Expected: "READY TO SUBMIT"
 ```
 
@@ -509,9 +498,11 @@ set RAKSHA_SECRET=your-secret       # Windows CMD
 
 ### "ModuleNotFoundError: No module named 'regex'"
 
-```bash
+```powershell
 # Make sure your virtual environment is activated
-source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1   # Windows PowerShell
+# source .venv/bin/activate     # macOS / Linux
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
