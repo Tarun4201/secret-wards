@@ -50,8 +50,8 @@ class TestDeterminism(unittest.TestCase):
             for fname in h1:
                 if fname == "report.json":
                     # report.json has timing/rss which vary; compare structurally
-                    r1 = json.loads((out1 / fname).read_text())
-                    r2 = json.loads((out2 / fname).read_text())
+                    r1 = json.loads((out1 / fname).read_text(encoding="utf-8"))
+                    r2 = json.loads((out2 / fname).read_text(encoding="utf-8"))
                     self.assertEqual(r1["files"], r2["files"], "report files section differs")
                     self.assertEqual(r1["counts"], r2["counts"], "report counts section differs")
                     continue
@@ -65,8 +65,8 @@ class TestDeterminism(unittest.TestCase):
             self._run_pipeline(FIXTURES, out1, "secret_alpha")
             self._run_pipeline(FIXTURES, out2, "secret_beta")
 
-            rec1 = [json.loads(line) for line in (out1 / "records.jsonl").read_text().splitlines() if line.strip()]
-            rec2 = [json.loads(line) for line in (out2 / "records.jsonl").read_text().splitlines() if line.strip()]
+            rec1 = [json.loads(line) for line in (out1 / "records.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            rec2 = [json.loads(line) for line in (out2 / "records.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
 
             # At least one pseudonym that is non-null should differ
             psns1 = {r["patient"] for r in rec1 if r["patient"]}
