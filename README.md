@@ -572,8 +572,9 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## Team
 
-**Team:** Phantom Troupe 
-**Track:** 3 — Secret Wards  
+**Team Name:** Phantom Troupe  
+**Members:** Tarun N, B V Hitesh Sai, Charan Gowda  
+**Track:** Track 3 — Secret Wards  
 **Event:** Yugaantar DevForge Hackathon  
 **Repository:** https://github.com/Tarun4201/secret-wards
 

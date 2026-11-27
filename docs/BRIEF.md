@@ -1,7 +1,8 @@
 # Secret Wards: Technical Brief
 **Product:** Offline, CPU-Only, LLM-Free Privacy Firewall for Synthetic Indian Hospital Records  
 **Track:** Yugaantar DevForge Track 3  
-**Team:** secret-wards  
+**Team:** Phantom Troupe  
+**Members:** Tarun N, B V Hitesh Sai, Charan Gowda  
 **Repository:** https://github.com/Tarun4201/secret-wards  
 
 ---
