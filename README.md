@@ -12,7 +12,6 @@
 *Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records.*
 
 [![Status](https://img.shields.io/badge/status-READY%20TO%20SUBMIT-brightgreen)]()
-[![Official Score](https://img.shields.io/badge/score-98.1%2F100-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![Tests](https://img.shields.io/badge/tests-74%2F74%20passing-brightgreen)]()
 [![Leaks](https://img.shields.io/badge/PII%20leaks-0%25-brightgreen)]()
@@ -26,7 +25,6 @@
 
 - [What is RAKSHA?](#what-is-raksha)
 - [Results at a Glance](#results-at-a-glance)
-- [Official 100-Point Scorecard](#official-100-point-scorecard)
 - [Stress Testing & Scalability](#stress-testing--scalability)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
@@ -63,7 +61,6 @@ RAKSHA is a privacy pipeline that:
 
 | Metric | Result | Notes |
 |--------|--------|-------|
-| **Official 100-Point Score** | **98.12 / 100.0** | +13.3 pts above organizer reference (+84.84) |
 | **Personal data leaks** | **0 / 3,230 (0.0%)** | Zero direct PII leaks across Latin, Devanagari, Hinglish |
 | **Canary traps leaked** | **0 / 4 (0.0%)** | 100% canaries intercepted & quarantined |
 | **Medical data preserved** | **4,855 / 4,855 (100.0%)** | Doses, vitals, labs, diagnoses, eponyms kept |
@@ -78,34 +75,6 @@ RAKSHA is a privacy pipeline that:
 | **Official submission check** | `READY TO SUBMIT` | Validated by `check_submission.py --run` |
 | **Runtime (practice data)** | **~6.7 seconds** | Consumes only 42 MB RAM (ceiling: 4,000 MB) |
 | **2-Page Project Brief PDF** | `docs/brief.pdf` | A4, >=10pt font, covering all required template sections |
-
----
-
-## Official 100-Point Scorecard
-
-Scored strictly against the official evaluation rules ([SCORING.md](../toolkit/docs/SCORING.md) and [scoring.toml](../toolkit/scoring.toml)):
-
-| Category | Weight | Max Pts | Achieved Score | Evaluation Basis |
-|---|---:|---:|---:|---|
-| **1. Multilingual PII Detection** | 20% | 20.00 | **20.00** | 0/3,230 leaks (0.0%), 100% unit recall across Latin, Deva, Hinglish, 0 canaries |
-| **2. Cross-Document Identity Resolution** | 15% | 15.00 | **14.93** | Precision 1.00, Recall 1.00, F0.5 1.00, 11/11 language traps, 605/605 homonyms |
-| **3. Adversarial Privacy & Re-ID** | 25% | 25.00 | **23.29** | A1: 0%, A6: 0%, A7: 0%, A2/A3: 2.2% unique, A4: 6.25%, A5: 21.4% |
-| **4. Clinical Utility Preservation** | 20% | 20.00 | **19.90** | 4,855/4,855 clinical values (100%), 65/65 exact stays (100%), 96.4% age bands |
-| **5. Data Integrity & Secure Export** | 10% | 10.00 | **10.00** | CONTRACT OK, valid syntax across 193 files, 0 raw copies, 817 aligned pseudonyms |
-| **6. CPU Efficiency & Reliability** | 10% | 10.00 | **10.00** | 6.7s 1x runtime, 42 MB RSS, 50k CSV burst in 39.7s, strict determinism |
-| **Critical Penalties (§6)** | — | 0.00 | **-0.00** | 0 direct leaks (-0), 0 canaries (-0), 0 raw copies (-0), 0 input tampering (-0) |
-| **TOTAL COMPOSITE SCORE** | **100%** | **100.00** | **98.12 / 100.00** | **High Distinction / Podium Placement** |
-
-### Calibration Ranking vs Official Baselines
-
-| Submission / Baseline | Description | Official Score |
-|---|---|---:|
-| `baselines/passthrough` | Copies all files raw without scrubbing | **-19.47** |
-| `baselines/naive_regex` | Regex + "Name:" labels, silent skips | **+4.56** |
-| `starter/main.py` | Official toolkit unmodified starter | **+8.00** |
-| `baselines/redact_all` | Destroys every value, key, and filename | **+21.70** |
-| `baselines/reference` | Official reference pipeline (organizers) | **+84.84** |
-| **RAKSHA (Our Pipeline)** | **Evidence-guided compiler with cross-script linkage & veto** | **+98.12** |
 
 ---
 
