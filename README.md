@@ -237,8 +237,10 @@ raksha/
 cd E:\scalar_hackthon\secret-wards
 
 python.exe -m venv .venv
+# For Linux or Mac    python3 -m venv .venv
 
 .\.venv\Scripts\Activate.ps1
+# For Linux or Mac    source .venv/bin/activate
 
 python -m pip install --upgrade pip
 
