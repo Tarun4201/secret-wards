@@ -233,35 +233,43 @@ raksha/
 
 ### Pre-Event Preparation (While You Have Internet)
 
+#### Windows (PowerShell)
 ```powershell
-cd E:\scalar_hackthon\secret-wards
-
-python.exe -m venv .venv
-# For Linux or Mac    python3 -m venv .venv
-
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-# For Linux or Mac    source .venv/bin/activate
-
 python -m pip install --upgrade pip
-
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
 
+#### macOS / Linux (Bash)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
 Verify installation and run tests:
 
+**Windows:**
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
+```
+
+**macOS / Linux:**
+```bash
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### Pre-Download All Wheels for Offline Install
 
 If your teammates need to install on a machine without internet:
 
-```powershell
+```bash
 # Download all wheels to a folder (run this WHILE ONLINE)
-mkdir offline_wheels
+mkdir -p offline_wheels
 pip download -r requirements.txt -d offline_wheels/
 pip download -r requirements-dev.txt -d offline_wheels/
 
@@ -270,20 +278,30 @@ pip download -r requirements-dev.txt -d offline_wheels/
 
 ### Offline Install (No Internet)
 
+#### Windows (PowerShell)
 ```powershell
-cd E:\scalar_hackthon\secret-wards
-
-python.exe -m venv .venv
-
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 # Install from local wheels
 pip install --no-index --find-links=offline_wheels/ -r requirements.txt
-
 pip install --no-index --find-links=offline_wheels/ -r requirements-dev.txt
 
 # Verify
 python -c "import regex, rapidfuzz, jellyfish, phonenumbers, indic_transliteration, psutil; print('All deps OK')"
+```
+
+#### macOS / Linux (Bash)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install from local wheels
+pip install --no-index --find-links=offline_wheels/ -r requirements.txt
+pip install --no-index --find-links=offline_wheels/ -r requirements-dev.txt
+
+# Verify
+python3 -c "import regex, rapidfuzz, jellyfish, phonenumbers, indic_transliteration, psutil; print('All deps OK')"
 ```
 
 ---
@@ -308,10 +326,18 @@ python main.py --input /path/to/input --output /path/to/output
 
 ### Example with Practice Data
 
+#### Windows (PowerShell)
 ```powershell
 # Assuming toolkit is in a sibling directory
 $env:RAKSHA_SECRET = "my-secret-2024"
 python main.py --input ..\toolkit\dev\input --output .\output
+```
+
+#### macOS / Linux (Bash)
+```bash
+# Assuming toolkit is in a sibling directory
+export RAKSHA_SECRET="my-secret-2024"
+python3 main.py --input ../toolkit/dev/input --output ./output
 ```
 
 ### What Happens
@@ -333,6 +359,7 @@ python main.py --input ..\toolkit\dev\input --output .\output
 
 ## Running Tests
 
+### Windows (PowerShell)
 ```powershell
 # Activate virtual environment first
 .\.venv\Scripts\Activate.ps1
@@ -350,7 +377,26 @@ python -m unittest discover -s tests -p "test_*.py" -v
 pytest tests/ -v
 ```
 
-> **Note (macOS / Linux):** You can also use `make test` where GNU `make` is installed.
+### macOS / Linux (Bash)
+```bash
+# Activate virtual environment first
+source .venv/bin/activate
+
+# Run all 67 tests
+python3 -m unittest discover -s tests -p "test_*.py"
+
+# Run a specific test file
+python3 -m unittest tests.test_clinical_protection
+
+# Run with verbose output
+python3 -m unittest discover -s tests -p "test_*.py" -v
+
+# Run with pytest (if installed)
+pytest tests/ -v
+
+# Or run via Makefile if make is installed
+make test
+```
 
 ### Test Categories
 
@@ -377,6 +423,7 @@ pytest tests/ -v
 
 Test how well the pipeline resists re-identification:
 
+### Windows (PowerShell)
 ```powershell
 # Run the voter-registry attacker against sanitized output
 python tools/attacker/attacker.py `
@@ -385,8 +432,18 @@ python tools/attacker/attacker.py `
     --records .\output\records.jsonl
 ```
 
+### macOS / Linux (Bash)
+```bash
+# Run the voter-registry attacker against sanitized output
+python3 tools/attacker/attacker.py \
+    --registry ../toolkit/dev/attacker/registry.csv \
+    --sanitized ./output/sanitized \
+    --records ./output/records.jsonl
+```
+
 ### Run the Full Benchmark Suite
 
+#### Windows (PowerShell)
 ```powershell
 # Privacy vs utility benchmark
 python tools/benchmark/benchmark.py
@@ -395,14 +452,24 @@ python tools/benchmark/benchmark.py
 python tools/benchmark/ablation.py
 ```
 
+#### macOS / Linux (Bash)
+```bash
+# Privacy vs utility benchmark
+python3 tools/benchmark/benchmark.py
+
+# Ablation study (tests each technique's contribution)
+python3 tools/benchmark/ablation.py
+```
+
 ---
 
 ## Official Validation & Teammate Verification Cheatsheet
 
-Run the official toolkit checks to verify submission readiness on any teammate laptop (PowerShell or Bash):
+Run the official toolkit checks to verify submission readiness on any teammate laptop:
 
+### Windows (PowerShell)
 ```powershell
-# 1. Run the firewall pipeline (Windows PowerShell)
+# 1. Run the firewall pipeline
 $env:RAKSHA_SECRET = "eval-secret-2024"
 python main.py --input ..\toolkit\dev\input --output .\output
 # Expected: files 200 sanitized 193 quarantined 7 records 817 (in ~7s)
@@ -417,6 +484,30 @@ python ..\toolkit\check_dev.py --output .\output --show 10
 
 # 4. Full official submission check (runs pipeline 3x for determinism & rotation)
 python ..\toolkit\check_submission.py --repo . --run
+# Expected output: "READY TO SUBMIT"
+
+# 5. Run automated test suites
+pytest
+# Expected: 74 passed in ~1.5s
+```
+
+### macOS / Linux (Bash)
+```bash
+# 1. Run the firewall pipeline
+export RAKSHA_SECRET="eval-secret-2024"
+python3 main.py --input ../toolkit/dev/input --output ./output
+# Expected: files 200 sanitized 193 quarantined 7 records 817 (in ~7s)
+
+# 2. Validate output contract format
+python3 ../toolkit/validate_output.py --input ../toolkit/dev/input --output ./output
+# Expected output: "CONTRACT OK"
+
+# 3. Verify privacy & clinical accuracy
+python3 ../toolkit/check_dev.py --output ./output --show 10
+# Expected: 0 of 3230 leaked (0.0%), 0 canaries, 4855/4855 medical kept (100.0%), P 1.00, R 1.00, F0.5 1.00
+
+# 4. Full official submission check (runs pipeline 3x for determinism & rotation)
+python3 ../toolkit/check_submission.py --repo . --run
 # Expected output: "READY TO SUBMIT"
 
 # 5. Run automated test suites
@@ -537,11 +628,19 @@ set RAKSHA_SECRET=your-secret       # Windows CMD
 
 ### "ModuleNotFoundError: No module named 'regex'"
 
+Make sure your virtual environment is activated and dependencies are installed:
+
+**Windows (PowerShell):**
 ```powershell
-# Make sure your virtual environment is activated
-.\.venv\Scripts\Activate.ps1   # Windows PowerShell
-# source .venv/bin/activate     # macOS / Linux
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+**macOS / Linux (Bash):**
+```bash
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -562,12 +661,20 @@ Check `report.json` for quarantine reasons. Common causes:
 
 ### Tests fail on a fresh clone
 
+Make sure your virtual environment is active and dev dependencies are installed:
+
+**Windows (PowerShell):**
 ```powershell
-# Make sure your virtual environment is active and dev dependencies are installed
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-# Run tests
 python -m unittest discover -s tests -p "test_*.py"
+```
+
+**macOS / Linux (Bash):**
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 ---
