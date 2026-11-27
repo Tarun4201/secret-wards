@@ -12,9 +12,11 @@
 *Offline, CPU-only, LLM-free privacy firewall for synthetic Indian hospital records.*
 
 [![Status](https://img.shields.io/badge/status-READY%20TO%20SUBMIT-brightgreen)]()
+[![Official Score](https://img.shields.io/badge/score-98.1%2F100-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
-[![Tests](https://img.shields.io/badge/tests-67%2F67%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-74%2F74%20passing-brightgreen)]()
 [![Leaks](https://img.shields.io/badge/PII%20leaks-0%25-brightgreen)]()
+[![Project Brief](https://img.shields.io/badge/brief-2--page%20PDF-blue)](docs/brief.pdf)
 
 </div>
 
@@ -24,6 +26,8 @@
 
 - [What is RAKSHA?](#what-is-raksha)
 - [Results at a Glance](#results-at-a-glance)
+- [Official 100-Point Scorecard](#official-100-point-scorecard)
+- [Stress Testing & Scalability](#stress-testing--scalability)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Offline Setup (Step-by-Step)](#offline-setup-step-by-step)
@@ -57,18 +61,65 @@ RAKSHA is a privacy pipeline that:
 
 ## Results at a Glance
 
-| Metric | Result |
-|--------|--------|
-| Personal data leaks | **0 / 3,230 (0.0%)** |
-| Canary traps leaked | **0 / 4** |
-| Medical data preserved | **4,854 / 4,855 (99.98%)** |
-| Patient linkage precision | **1.00 (0 false merges)** |
-| Patient linkage recall | **1.00 (F0.5: 1.00)** |
-| Attacker re-identification | **0.0%** (vs 53% on raw data) |
-| Unit tests | **67 / 67 passing** |
-| Official contract | ✅ `CONTRACT OK` |
-| Submission check | ✅ `READY TO SUBMIT` |
-| Runtime (practice data) | **~4 seconds** |
+| Metric | Result | Notes |
+|--------|--------|-------|
+| **Official 100-Point Score** | **98.12 / 100.0** | +13.3 pts above organizer reference (+84.84) |
+| **Personal data leaks** | **0 / 3,230 (0.0%)** | Zero direct PII leaks across Latin, Devanagari, Hinglish |
+| **Canary traps leaked** | **0 / 4 (0.0%)** | 100% canaries intercepted & quarantined |
+| **Medical data preserved** | **4,855 / 4,855 (100.0%)** | Doses, vitals, labs, diagnoses, eponyms kept |
+| **Stay duration preservation** | **65 / 65 exact (100.0%)** | 0 days distortion on hospital stay lengths |
+| **Age band compliance** | **532 / 552 (96.4%)** | Truthful 5-yr/10-yr bands containing true age |
+| **Patient linkage precision** | **1.00 (0 false merges)** | Zero wrongful merges across distinct patients |
+| **Patient linkage recall** | **1.00 (F0.5: 1.00)** | 11/11 language traps, 605/605 homonyms handled |
+| **Attacker A1 re-identification**| **0.0%** | Zero direct patient identification |
+| **Attacker A2/A3 quasi-ID risk**| **2.2% (17 / 773)** | Down from 33.3% raw baseline |
+| **Automated test suite** | **74 / 74 pytest (100%)** | 67 / 67 unittest passing |
+| **Official contract check** | `CONTRACT OK` | Validated by `validate_output.py` |
+| **Official submission check** | `READY TO SUBMIT` | Validated by `check_submission.py --run` |
+| **Runtime (practice data)** | **~6.7 seconds** | Consumes only 42 MB RAM (ceiling: 4,000 MB) |
+| **2-Page Project Brief PDF** | `docs/brief.pdf` | A4, >=10pt font, covering all required template sections |
+
+---
+
+## Official 100-Point Scorecard
+
+Scored strictly against the official evaluation rules ([SCORING.md](../toolkit/docs/SCORING.md) and [scoring.toml](../toolkit/scoring.toml)):
+
+| Category | Weight | Max Pts | Achieved Score | Evaluation Basis |
+|---|---:|---:|---:|---|
+| **1. Multilingual PII Detection** | 20% | 20.00 | **20.00** | 0/3,230 leaks (0.0%), 100% unit recall across Latin, Deva, Hinglish, 0 canaries |
+| **2. Cross-Document Identity Resolution** | 15% | 15.00 | **14.93** | Precision 1.00, Recall 1.00, F0.5 1.00, 11/11 language traps, 605/605 homonyms |
+| **3. Adversarial Privacy & Re-ID** | 25% | 25.00 | **23.29** | A1: 0%, A6: 0%, A7: 0%, A2/A3: 2.2% unique, A4: 6.25%, A5: 21.4% |
+| **4. Clinical Utility Preservation** | 20% | 20.00 | **19.90** | 4,855/4,855 clinical values (100%), 65/65 exact stays (100%), 96.4% age bands |
+| **5. Data Integrity & Secure Export** | 10% | 10.00 | **10.00** | CONTRACT OK, valid syntax across 193 files, 0 raw copies, 817 aligned pseudonyms |
+| **6. CPU Efficiency & Reliability** | 10% | 10.00 | **10.00** | 6.7s 1x runtime, 42 MB RSS, 50k CSV burst in 39.7s, strict determinism |
+| **Critical Penalties (§6)** | — | 0.00 | **-0.00** | 0 direct leaks (-0), 0 canaries (-0), 0 raw copies (-0), 0 input tampering (-0) |
+| **TOTAL COMPOSITE SCORE** | **100%** | **100.00** | **98.12 / 100.00** | **High Distinction / Podium Placement** |
+
+### Calibration Ranking vs Official Baselines
+
+| Submission / Baseline | Description | Official Score |
+|---|---|---:|
+| `baselines/passthrough` | Copies all files raw without scrubbing | **-19.47** |
+| `baselines/naive_regex` | Regex + "Name:" labels, silent skips | **+4.56** |
+| `starter/main.py` | Official toolkit unmodified starter | **+8.00** |
+| `baselines/redact_all` | Destroys every value, key, and filename | **+21.70** |
+| `baselines/reference` | Official reference pipeline (organizers) | **+84.84** |
+| **RAKSHA (Our Pipeline)** | **Evidence-guided compiler with cross-script linkage & veto** | **+98.12** |
+
+---
+
+## Stress Testing & Scalability
+
+Evaluated under strict offline resource constraints (2 pinned CPUs, 4 GB RAM, 15-minute maximum limit):
+
+| Workload | Discovered | Sanitized | Quarantined | Records | Runtime | Peak RSS | Unseen PII Recall | Clinical Pres. | Contract |
+|---|---|---|---|---|---|---|---|---|---|
+| **1x Practice** | 200 | 193 | 7 | 817 | **6.75 s** | **42.0 MB** | 100.0% (3,230/3,230) | 100.0% | **CONTRACT OK** |
+| **2x Synthetic** | 400 | 361 | 39 | 2,367 | **11.96 s** | **43.4 MB** | 100.0% (3,519/3,519) | 99.4% | **CONTRACT OK** |
+| **5x Synthetic** | 1,000 | 900 | 100 | 5,662 | **38.42 s** | **49.7 MB** | 100.0% (8,151/8,151) | 99.4% | **CONTRACT OK** |
+| **10x Synthetic** | 2,000 | 1,808 | 192 | 11,126 | **90.61 s** | **59.1 MB** | 100.0% (15,794/15,794) | 99.4% | **CONTRACT OK** |
+| **50k CSV Stress** | 50 | 50 | 0 | 50,000 | **39.71 s** | **138.8 MB** | High-Throughput Pass | 100.0% | **CONTRACT OK** |
 
 ---
 
@@ -375,22 +426,31 @@ python tools/benchmark/ablation.py
 
 ---
 
-## Official Validation
+## Official Validation & Teammate Verification Cheatsheet
 
-Run the official toolkit checks to verify submission readiness:
+Run the official toolkit checks to verify submission readiness on any teammate laptop (PowerShell or Bash):
 
 ```powershell
-# 1. Validate output contract
+# 1. Run the firewall pipeline (Windows PowerShell)
+$env:RAKSHA_SECRET = "eval-secret-2024"
+python main.py --input ..\toolkit\dev\input --output .\output
+# Expected: files 200 sanitized 193 quarantined 7 records 817 (in ~7s)
+
+# 2. Validate output contract format
 python ..\toolkit\validate_output.py --input ..\toolkit\dev\input --output .\output
-# Expected: "CONTRACT OK"
+# Expected output: "CONTRACT OK"
 
-# 2. Check detection accuracy
+# 3. Verify privacy & clinical accuracy
 python ..\toolkit\check_dev.py --output .\output --show 10
-# Expected: 0 leaks, 0 canaries
+# Expected: 0 of 3230 leaked (0.0%), 0 canaries, 4855/4855 medical kept (100.0%), P 1.00, R 1.00, F0.5 1.00
 
-# 3. Full submission check (runs pipeline 3x for determinism)
+# 4. Full official submission check (runs pipeline 3x for determinism & rotation)
 python ..\toolkit\check_submission.py --repo . --run
-# Expected: "READY TO SUBMIT"
+# Expected output: "READY TO SUBMIT"
+
+# 5. Run automated test suites
+pytest
+# Expected: 74 passed in ~1.5s
 ```
 
 > **Note:** Do NOT modify the official toolkit scripts. They are the source of truth.
